@@ -73,10 +73,7 @@ export async function POST(req: Request) {
       ]
     });
 
-    // Serialize the transaction for the frontend to sign
-    // The frontend will use this with dapp-kit to execute
-    const txData = tx.getData();
-
+    // Return transaction parameters for frontend to build and sign
     return NextResponse.json({
       success: true,
       transactionData: {

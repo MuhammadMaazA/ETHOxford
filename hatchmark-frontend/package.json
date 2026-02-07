@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@types/blueimp-md5": "^2.18.2",
     "@types/node": "^20.19.32",
     "@types/react": "^19",
     "@types/react-dom": "^19",

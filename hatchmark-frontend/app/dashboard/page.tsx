@@ -89,7 +89,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">My Certificates</h1>
           <p className="text-gray-600">
-            Content you've registered on the Sui blockchain
+            Content you&apos;ve registered on the Sui blockchain
           </p>
         </div>
         <Link
@@ -123,7 +123,7 @@ export default function DashboardPage() {
           </div>
           <h2 className="text-xl font-semibold text-gray-900 mb-2">No Certificates Yet</h2>
           <p className="text-gray-600 mb-6">
-            You haven't registered any content yet
+            You haven&apos;t registered any content yet
           </p>
           <Link
             href="/register"

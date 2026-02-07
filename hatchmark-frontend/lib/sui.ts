@@ -2,15 +2,16 @@
  * Sui client configuration for Hatchmark
  */
 
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
 
 // Use testnet by default
 const network = (process.env.NEXT_PUBLIC_SUI_NETWORK || 'testnet') as 'testnet' | 'mainnet' | 'devnet';
 export const NETWORK = network;
 
 // Sui client singleton
-export const suiClient = new SuiClient({ 
-  url: getFullnodeUrl(network) 
+export const suiClient = new SuiJsonRpcClient({ 
+  url: getJsonRpcFullnodeUrl(network),
+  network: network
 });
 
 // Package ID for Hatchmark contracts

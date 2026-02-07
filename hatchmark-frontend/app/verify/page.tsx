@@ -5,7 +5,7 @@ import { useDropzone } from 'react-dropzone';
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
 import toast from 'react-hot-toast';
-import { Search, Image as ImageIcon, AlertTriangle, CheckCircle, Loader2, Flag, ExternalLink } from 'lucide-react';
+import { Image as ImageIcon, AlertTriangle, CheckCircle, Loader2, Flag, ExternalLink } from 'lucide-react';
 import md5 from 'blueimp-md5';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || 
@@ -108,13 +108,15 @@ export default function VerifyPage() {
     try {
       const tx = new Transaction();
       const hashBytes = hexToBytes(imageHash);
+      // Contract expects hammingDistance as u8 (0-255), not similarity percentage
+      const similarityScore = Math.min(255, match.hammingDistance);
 
       tx.moveCall({
         target: `${PACKAGE_ID}::registry::flag_content`,
         arguments: [
           tx.object(match.cert_id),
           tx.pure.vector('u8', hashBytes),
-          tx.pure.u8(match.similarity),
+          tx.pure.u8(similarityScore),
           tx.object(SUI_CLOCK),
         ],
       });
@@ -122,7 +124,7 @@ export default function VerifyPage() {
       signAndExecute(
         { transaction: tx },
         {
-          onSuccess: (result) => {
+          onSuccess: () => {
             toast.success('Dispute filed successfully!');
           },
           onError: (error) => {
@@ -183,7 +185,7 @@ export default function VerifyPage() {
                 Drop an image to verify, or click to browse
               </p>
               <p className="text-sm text-gray-500 mt-1">
-                We'll check it against the on-chain registry
+                We&apos;ll check it against the on-chain registry
               </p>
             </div>
           </div>
