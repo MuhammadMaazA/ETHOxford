@@ -39,8 +39,6 @@ export default function VerifyPage() {
   const [result, setResult] = useState<VerifyResult | null>(null);
 
   const computeHash = useCallback(async (file: File) => {
-    // Use perceptual hash (dHash) - produces 16 hex chars (64 bits)
-    // Catches screenshots, crops, resizes, compression
     const hash = await computePerceptualHash(file);
     return hash;
   }, []);
@@ -56,7 +54,6 @@ export default function VerifyPage() {
     const hash = await computeHash(file);
     setImageHash(hash);
 
-    // Automatically verify
     setIsVerifying(true);
     try {
       const response = await fetch('/api/verify', {
@@ -103,7 +100,6 @@ export default function VerifyPage() {
     try {
       const tx = new Transaction();
       const hashBytes = hexToBytes(imageHash);
-      // Contract expects hammingDistance as u8 (0-255), not similarity percentage
       const similarityScore = Math.min(255, match.hammingDistance);
 
       tx.moveCall({
@@ -143,187 +139,187 @@ export default function VerifyPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Verify Content</h1>
-        <p className="text-gray-600">
-          Check if an image has been registered or if similar content exists
-        </p>
-      </div>
+    <div className="min-h-screen bg-white dark:bg-neutral-950">
+      <div className="max-w-3xl mx-auto px-4 py-16">
+        <div className="mb-12">
+          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white mb-2">
+            Verify Content
+          </h1>
+          <p className="text-neutral-500 dark:text-neutral-400">
+            Check if an image has been registered on the blockchain
+          </p>
+        </div>
 
-      {/* Upload Area */}
-      <div
-        {...getRootProps()}
-        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors mb-8 ${
-          isDragActive
-            ? 'border-blue-500 bg-blue-50'
-            : 'border-gray-300 hover:border-gray-400'
-        }`}
-      >
-        <input {...getInputProps()} />
-        {imagePreview ? (
-          <div className="space-y-4">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="max-h-48 mx-auto rounded-lg shadow-md"
-            />
-            <p className="text-sm text-gray-500">Click or drag to check another image</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
-              <ImageIcon className="w-8 h-8 text-gray-400" />
+        <div
+          {...getRootProps()}
+          className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 mb-8 ${
+            isDragActive
+              ? 'border-neutral-900 dark:border-white bg-neutral-50 dark:bg-neutral-900'
+              : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-600'
+          }`}
+        >
+          <input {...getInputProps()} />
+          {imagePreview ? (
+            <div className="space-y-4">
+              <img
+                src={imagePreview}
+                alt="Preview"
+                className="max-h-48 mx-auto rounded-lg"
+              />
+              <p className="text-sm text-neutral-500">Click or drag to check another image</p>
             </div>
-            <div>
-              <p className="text-gray-700 font-medium">
-                Drop an image to verify, or click to browse
-              </p>
-              <p className="text-sm text-gray-500 mt-1">
-                We&apos;ll check it against the on-chain registry
-              </p>
+          ) : (
+            <div className="space-y-4">
+              <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto">
+                <ImageIcon className="w-6 h-6 text-neutral-400" />
+              </div>
+              <div>
+                <p className="text-neutral-700 dark:text-neutral-300 font-medium">
+                  Drop an image to verify
+                </p>
+                <p className="text-sm text-neutral-500 mt-1">
+                  or click to browse
+                </p>
+              </div>
             </div>
+          )}
+        </div>
+
+        {isVerifying && (
+          <div className="bg-neutral-50 dark:bg-neutral-900 rounded-2xl p-8 text-center border border-neutral-200 dark:border-neutral-800">
+            <Loader2 className="w-8 h-8 animate-spin text-neutral-400 mx-auto mb-3" />
+            <p className="text-neutral-600 dark:text-neutral-400">Checking registry...</p>
           </div>
         )}
-      </div>
 
-      {/* Loading State */}
-      {isVerifying && (
-        <div className="text-center py-12">
-          <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-600">Checking against registry...</p>
-        </div>
-      )}
-
-      {/* Results */}
-      {result && !isVerifying && (
-        <div className="space-y-6">
-          {/* Original Content */}
-          {result.isOriginal ? (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-8 h-8 text-green-500" />
-                <div>
-                  <h2 className="text-xl font-semibold text-green-800">
-                    Appears to be Original
-                  </h2>
-                  <p className="text-green-700">
-                    No similar content found in the registry ({result.totalRegistrations} checked)
-                  </p>
+        {result && !isVerifying && (
+          <div className="space-y-6">
+            {result.isOriginal ? (
+              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-green-100 dark:bg-green-500/20 rounded-full flex items-center justify-center">
+                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-neutral-900 dark:text-white">
+                      Original Content
+                    </h2>
+                    <p className="text-sm text-neutral-500">
+                      No matches found in {result.totalRegistrations} registrations
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : result.exactMatch && account && result.exactMatch.creator === account.address ? (
-            // User is the original creator - show ownership confirmation
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-8 h-8 text-blue-500" />
-                <div>
-                  <h2 className="text-xl font-semibold text-blue-800">
-                    This is YOUR Registered Content ✓
-                  </h2>
-                  <p className="text-blue-700">
-                    You registered &quot;{result.exactMatch.title}&quot; on {formatDate(result.exactMatch.registered_at)}
-                  </p>
+            ) : result.exactMatch && account && result.exactMatch.creator === account.address ? (
+              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-neutral-200 dark:bg-neutral-800 rounded-full flex items-center justify-center">
+                    <CheckCircle className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-neutral-900 dark:text-white">
+                      Your Registration
+                    </h2>
+                    <p className="text-sm text-neutral-500">
+                      &quot;{result.exactMatch.title}&quot; • {formatDate(result.exactMatch.registered_at)}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="mt-4">
                 <a
                   href={`https://suiscan.xyz/testnet/object/${result.exactMatch.cert_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                  className="inline-flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  View Your Certificate on Sui Explorer
+                  View on Explorer
                 </a>
               </div>
-            </div>
-          ) : (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <AlertTriangle className="w-8 h-8 text-red-500" />
-                <div>
-                  <h2 className="text-xl font-semibold text-red-800">
-                    Content Already Registered by Someone Else
-                  </h2>
-                  <p className="text-red-700">
-                    {result.matches.length} match(es) found - if you believe this is YOUR original work, you can flag it
-                  </p>
+            ) : (
+              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 bg-red-100 dark:bg-red-500/20 rounded-full flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-neutral-900 dark:text-white">
+                      Already Registered
+                    </h2>
+                    <p className="text-sm text-neutral-500">
+                      {result.matches.length} match(es) found
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {result.matches.map((match) => (
+                    <div
+                      key={match.cert_id}
+                      className="bg-white dark:bg-neutral-950 rounded-xl p-4 border border-neutral-200 dark:border-neutral-800"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-medium text-neutral-900 dark:text-white">{match.title}</h3>
+                          <p className="text-sm text-neutral-500 mt-1">
+                            {formatDate(match.registered_at)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className={`text-lg font-semibold ${
+                            match.similarity >= 95 ? 'text-red-600 dark:text-red-400' :
+                            match.similarity >= 90 ? 'text-orange-600 dark:text-orange-400' : 
+                            'text-yellow-600 dark:text-yellow-400'
+                          }`}>
+                            {match.similarity}%
+                          </span>
+                          <p className="text-xs text-neutral-500">match</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <a
+                          href={`https://suiscan.xyz/testnet/object/${match.cert_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          View
+                        </a>
+                        {match.similarity >= 90 && account && match.creator !== account.address && (
+                          <button
+                            onClick={() => handleFlag(match)}
+                            disabled={isFlagging}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                          >
+                            <Flag className="w-3 h-3" />
+                            {isFlagging ? 'Filing...' : 'Flag'}
+                          </button>
+                        )}
+                        {account && match.creator === account.address && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 rounded-lg">
+                            <CheckCircle className="w-3 h-3" />
+                            Yours
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
+            )}
 
-              {/* Matches List */}
-              <div className="space-y-4 mt-6">
-                {result.matches.map((match) => (
-                  <div
-                    key={match.cert_id}
-                    className="bg-white rounded-lg p-4 border border-red-100"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="space-y-1">
-                        <h3 className="font-semibold text-gray-900">{match.title}</h3>
-                        <p className="text-sm text-gray-500">
-                          Registered: {formatDate(match.registered_at)}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          Creator: {match.creator.slice(0, 8)}...{match.creator.slice(-6)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <div className={`text-2xl font-bold ${
-                          match.similarity >= 95 ? 'text-red-600' : 
-                          match.similarity >= 90 ? 'text-orange-600' : 'text-yellow-600'
-                        }`}>
-                          {match.similarity}%
-                        </div>
-                        <p className="text-xs text-gray-500">similarity</p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 mt-4">
-                      <a
-                        href={`https://suiscan.xyz/testnet/object/${match.cert_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                        View Certificate
-                      </a>
-                      {/* Only show Flag button if user is NOT the creator */}
-                      {match.similarity >= 90 && account && match.creator !== account.address && (
-                        <button
-                          onClick={() => handleFlag(match)}
-                          disabled={isFlagging}
-                          className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
-                        >
-                          <Flag className="w-4 h-4" />
-                          {isFlagging ? 'Filing...' : 'Flag as Stolen'}
-                        </button>
-                      )}
-                      {account && match.creator === account.address && (
-                        <span className="flex items-center gap-1 text-sm text-green-600">
-                          <CheckCircle className="w-4 h-4" />
-                          Your Registration
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+            {imageHash && (
+              <div className="bg-neutral-50 dark:bg-neutral-900 rounded-xl p-4 border border-neutral-200 dark:border-neutral-800">
+                <p className="text-xs text-neutral-500 mb-1">Content Hash</p>
+                <code className="text-xs text-neutral-700 dark:text-neutral-300 font-mono break-all">
+                  {imageHash}
+                </code>
               </div>
-            </div>
-          )}
-
-          {/* Hash Info */}
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-sm text-gray-600 mb-1">Computed Hash</p>
-            <code className="text-xs text-gray-800 break-all font-mono">
-              {imageHash}
-            </code>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
