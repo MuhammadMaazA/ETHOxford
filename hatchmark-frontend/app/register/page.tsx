@@ -7,6 +7,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import toast from 'react-hot-toast';
 import { Upload, Image as ImageIcon, CheckCircle, Loader2, ExternalLink } from 'lucide-react';
 import { computePerceptualHash } from '@/lib/phash';
+import { AIDetectionBadge, type AIDetectionResult } from '@/components/AIDetectionBadge';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || 
   '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
@@ -26,6 +27,9 @@ export default function RegisterPage() {
     isDuplicate: boolean;
     existingCert?: { title: string; creator: string; registered_at: number };
   } | null>(null);
+  const [aiDetection, setAiDetection] = useState<AIDetectionResult | null>(null);
+  const [isDetectingAI, setIsDetectingAI] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
   const checkDuplicate = useCallback(async (hash: string) => {
     setIsChecking(true);
@@ -60,18 +64,55 @@ export default function RegisterPage() {
     return hash;
   }, []);
 
+  const detectAI = useCallback(async (file: File) => {
+    setIsDetectingAI(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target?.result?.toString().split(',')[1];
+        if (!base64) return;
+        
+        const res = await fetch('/api/ai-detect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64 }),
+        });
+        const data = await res.json();
+        setAiDetection(data);
+        
+        if (data.isAIGenerated && data.confidence > 70) {
+          toast('This image appears to be AI-generated', { icon: '🤖' });
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('AI detection failed:', error);
+      setAiDetection(null);
+    } finally {
+      // Small delay to ensure state updates properly
+      setTimeout(() => setIsDetectingAI(false), 500);
+    }
+  }, []);
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;
 
     setDuplicateInfo(null);
+    setAiDetection(null);
+    setUploadedFile(file);
     const preview = URL.createObjectURL(file);
     setImagePreview(preview);
 
     const hash = await computeHash(file);
     setImageHash(hash);
-    await checkDuplicate(hash);
-  }, [computeHash, checkDuplicate]);
+    
+    // Run duplicate check and AI detection in parallel
+    await Promise.all([
+      checkDuplicate(hash),
+      detectAI(file),
+    ]);
+  }, [computeHash, checkDuplicate, detectAI]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -255,6 +296,11 @@ export default function RegisterPage() {
                 <CheckCircle className="w-4 h-4" />
                 Original content - ready to register
               </div>
+            )}
+
+            {/* AI Detection */}
+            {(isDetectingAI || aiDetection) && (
+              <AIDetectionBadge result={aiDetection} isLoading={isDetectingAI} />
             )}
           </div>
 

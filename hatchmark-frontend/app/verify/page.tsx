@@ -7,6 +7,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import toast from 'react-hot-toast';
 import { Image as ImageIcon, AlertTriangle, CheckCircle, Loader2, Flag, ExternalLink } from 'lucide-react';
 import { computePerceptualHash } from '@/lib/phash';
+import { AIDetectionBadge, type AIDetectionResult } from '@/components/AIDetectionBadge';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || 
   '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
@@ -37,10 +38,37 @@ export default function VerifyPage() {
   const [imageHash, setImageHash] = useState<string>('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [result, setResult] = useState<VerifyResult | null>(null);
+  const [aiDetection, setAiDetection] = useState<AIDetectionResult | null>(null);
+  const [isDetectingAI, setIsDetectingAI] = useState(false);
 
   const computeHash = useCallback(async (file: File) => {
     const hash = await computePerceptualHash(file);
     return hash;
+  }, []);
+
+  const detectAI = useCallback(async (file: File) => {
+    setIsDetectingAI(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target?.result?.toString().split(',')[1];
+        if (!base64) return;
+        
+        const res = await fetch('/api/ai-detect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64 }),
+        });
+        const data = await res.json();
+        setAiDetection(data);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('AI detection failed:', error);
+      setAiDetection(null);
+    } finally {
+      setTimeout(() => setIsDetectingAI(false), 500);
+    }
   }, []);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -48,11 +76,15 @@ export default function VerifyPage() {
     if (!file) return;
 
     setResult(null);
+    setAiDetection(null);
     const preview = URL.createObjectURL(file);
     setImagePreview(preview);
 
     const hash = await computeHash(file);
     setImageHash(hash);
+
+    // Start AI detection in parallel
+    detectAI(file);
 
     setIsVerifying(true);
     try {
@@ -75,7 +107,7 @@ export default function VerifyPage() {
     } finally {
       setIsVerifying(false);
     }
-  }, [computeHash]);
+  }, [computeHash, detectAI]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -189,6 +221,13 @@ export default function VerifyPage() {
           <div className="bg-neutral-50 dark:bg-neutral-900 rounded-2xl p-8 text-center border border-neutral-200 dark:border-neutral-800">
             <Loader2 className="w-8 h-8 animate-spin text-neutral-400 mx-auto mb-3" />
             <p className="text-neutral-600 dark:text-neutral-400">Checking registry...</p>
+          </div>
+        )}
+
+        {/* AI Detection Results */}
+        {(isDetectingAI || aiDetection) && !isVerifying && (
+          <div className="mb-6">
+            <AIDetectionBadge result={aiDetection} isLoading={isDetectingAI} />
           </div>
         )}
 
