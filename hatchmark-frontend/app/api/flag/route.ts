@@ -32,7 +32,7 @@ function hexToBytes(hex: string): number[] {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { originalCertId, flaggedHash, similarityScore } = body;
+    const { originalCertId, flaggedHash, similarityScore, hammingDistance } = body;
 
     // Validate inputs
     if (!originalCertId || typeof originalCertId !== 'string') {
@@ -49,9 +49,17 @@ export async function POST(req: Request) {
       );
     }
 
-    if (typeof similarityScore !== 'number' || similarityScore < 0 || similarityScore > 100) {
+    // Accept either hammingDistance (0-255, contract native) or similarityScore (0-100)
+    // hammingDistance takes precedence if both provided
+    let scoreForContract: number;
+    if (typeof hammingDistance === 'number' && hammingDistance >= 0 && hammingDistance <= 255) {
+      scoreForContract = Math.round(hammingDistance);
+    } else if (typeof similarityScore === 'number' && similarityScore >= 0 && similarityScore <= 100) {
+      // Convert percentage to hamming-like score: 100% similarity = 0 distance
+      scoreForContract = Math.round((100 - similarityScore) * 2.55);
+    } else {
       return NextResponse.json(
-        { error: 'similarityScore must be a number between 0 and 100' },
+        { error: 'Either hammingDistance (0-255) or similarityScore (0-100) is required' },
         { status: 400 }
       );
     }
@@ -76,7 +84,7 @@ export async function POST(req: Request) {
       arguments: [
         tx.object(originalCertId),                  // cert: &RegistrationCertificate
         tx.pure.vector('u8', hashBytes),            // flagged_hash: vector<u8>
-        tx.pure.u8(Math.round(similarityScore)),    // similarity_score: u8
+        tx.pure.u8(scoreForContract),               // similarity_score: u8 (hamming distance)
         tx.object(SUI_CLOCK)                        // clock: &Clock
       ]
     });
@@ -89,7 +97,7 @@ export async function POST(req: Request) {
         arguments: {
           originalCertId,
           flaggedHash: hashBytes,
-          similarityScore: Math.round(similarityScore)
+          hammingDistance: scoreForContract
         }
       },
       packageId: PACKAGE_ID,
@@ -97,7 +105,8 @@ export async function POST(req: Request) {
       inputs: {
         originalCertId,
         flaggedHash,
-        similarityScore: Math.round(similarityScore)
+        hammingDistance: scoreForContract,
+        similarityScore: similarityScore ?? (100 - scoreForContract / 2.55)
       },
       message: 'Dispute transaction parameters ready. Build and sign with your wallet on the frontend.'
     });
@@ -119,8 +128,10 @@ export async function GET() {
     body: {
       originalCertId: 'string (Sui object ID of the original registration)',
       flaggedHash: 'string (hex-encoded hash of the flagged content)',
-      similarityScore: 'number (0-100, similarity percentage)'
+      hammingDistance: 'number (0-255, bit difference - lower = more similar) [preferred]',
+      similarityScore: 'number (0-100, similarity percentage) [alternative]'
     },
+    note: 'Provide either hammingDistance or similarityScore. hammingDistance takes precedence.',
     returns: {
       transaction: 'string (base64 encoded transaction to sign)'
     },
