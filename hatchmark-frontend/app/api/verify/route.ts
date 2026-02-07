@@ -31,7 +31,7 @@ function hammingDistance(hash1: string, hash2: string): number {
     for (let i = 0; i < minLen; i++) {
       const byte1 = parseInt(h1[i], 16);
       const byte2 = parseInt(h2[i], 16);
-      // Count differing bits using XOR and popcount
+      // Count differing bits using XOR and popcounts
       let xor = byte1 ^ byte2;
       while (xor) {
         distance += xor & 1;
