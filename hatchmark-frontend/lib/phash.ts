@@ -1,19 +1,21 @@
 /**
- * Perceptual Hash (dHash) Implementation
+ * DCT-based Perceptual Hash (pHash) Implementation
  * 
- * Uses difference hash algorithm:
- * 1. Resize to 9x8 grayscale
- * 2. Compare adjacent horizontal pixels
- * 3. Generate 64-bit fingerprint
+ * Uses Discrete Cosine Transform for robust image fingerprinting:
+ * 1. Resize image to 32x32 grayscale
+ * 2. Apply 2D DCT (Discrete Cosine Transform)
+ * 3. Extract top-left 8x8 block (low-frequency components)
+ * 4. Generate hash by comparing to median
  * 
- * Similar images produce similar hashes even after:
- * - Screenshots, cropping, resizing
- * - JPEG compression
- * - Color adjustments
+ * DCT-based pHash is highly robust against:
+ * - Screenshots (gamma changes, anti-aliasing)
+ * - JPEG compression (up to 75%)
+ * - Slight color adjustments
+ * - Minor cropping and resizing
  */
 
 /**
- * Compute perceptual hash of an image file
+ * Compute DCT-based perceptual hash of an image file
  * Returns 16-character hex string (64 bits)
  */
 export async function computePerceptualHash(file: File): Promise<string> {
@@ -23,7 +25,7 @@ export async function computePerceptualHash(file: File): Promise<string> {
     
     img.onload = () => {
       try {
-        const hash = calculateDHash(img);
+        const hash = calculateDCTHash(img);
         resolve(hash);
       } catch (error) {
         reject(error);
@@ -45,9 +47,33 @@ export async function computePerceptualHash(file: File): Promise<string> {
 }
 
 /**
- * Calculate dHash (difference hash) from an image
+ * Pre-computed DCT coefficients for 32x32 -> 8x8
+ * c[k] = cos((2n+1) * k * PI / 64) for n,k in [0,31]
  */
-function calculateDHash(img: HTMLImageElement): string {
+const DCT_SIZE = 32;
+const HASH_SIZE = 8;
+
+// Precompute DCT matrix for efficiency
+let dctMatrix: number[][] | null = null;
+
+function getDCTMatrix(): number[][] {
+  if (dctMatrix) return dctMatrix;
+  
+  dctMatrix = [];
+  for (let k = 0; k < DCT_SIZE; k++) {
+    const row: number[] = [];
+    for (let n = 0; n < DCT_SIZE; n++) {
+      row.push(Math.cos((Math.PI / DCT_SIZE) * (n + 0.5) * k));
+    }
+    dctMatrix.push(row);
+  }
+  return dctMatrix;
+}
+
+/**
+ * Calculate DCT-based pHash from an image
+ */
+function calculateDCTHash(img: HTMLImageElement): string {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   
@@ -55,23 +81,24 @@ function calculateDHash(img: HTMLImageElement): string {
     throw new Error('Canvas not supported');
   }
   
-  // Resize to 9x8 (we need 9 pixels wide to compare 8 pairs)
-  const width = 9;
-  const height = 8;
-  canvas.width = width;
-  canvas.height = height;
+  // Resize to 32x32 for DCT
+  canvas.width = DCT_SIZE;
+  canvas.height = DCT_SIZE;
   
-  // Draw resized grayscale image
-  ctx.drawImage(img, 0, 0, width, height);
-  const imageData = ctx.getImageData(0, 0, width, height);
+  // Use high-quality scaling
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  
+  ctx.drawImage(img, 0, 0, DCT_SIZE, DCT_SIZE);
+  const imageData = ctx.getImageData(0, 0, DCT_SIZE, DCT_SIZE);
   const pixels = imageData.data;
   
-  // Convert to grayscale values
+  // Convert to grayscale matrix
   const grayscale: number[][] = [];
-  for (let y = 0; y < height; y++) {
+  for (let y = 0; y < DCT_SIZE; y++) {
     const row: number[] = [];
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
+    for (let x = 0; x < DCT_SIZE; x++) {
+      const idx = (y * DCT_SIZE + x) * 4;
       // Luminance formula: 0.299R + 0.587G + 0.114B
       const gray = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
       row.push(gray);
@@ -79,19 +106,76 @@ function calculateDHash(img: HTMLImageElement): string {
     grayscale.push(row);
   }
   
-  // Compute difference hash
-  // Compare each pixel to its right neighbor
-  // If left > right, bit = 1, else bit = 0
+  // Apply 2D DCT
+  const dctResult = applyDCT2D(grayscale);
+  
+  // Extract top-left 8x8 block (low-frequency components)
+  // Skip [0][0] as it's the DC component (average brightness)
+  const lowFreq: number[] = [];
+  for (let y = 0; y < HASH_SIZE; y++) {
+    for (let x = 0; x < HASH_SIZE; x++) {
+      if (x === 0 && y === 0) continue; // Skip DC
+      lowFreq.push(dctResult[y][x]);
+    }
+  }
+  
+  // Calculate median of low-frequency values
+  const sorted = [...lowFreq].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  
+  // Generate hash: 1 if value > median, else 0
   let hash = '';
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width - 1; x++) {
-      const bit = grayscale[y][x] > grayscale[y][x + 1] ? '1' : '0';
-      hash += bit;
+  for (let y = 0; y < HASH_SIZE; y++) {
+    for (let x = 0; x < HASH_SIZE; x++) {
+      if (x === 0 && y === 0) {
+        hash += '0'; // DC component always 0
+      } else {
+        hash += dctResult[y][x] > median ? '1' : '0';
+      }
     }
   }
   
   // Convert 64-bit binary string to 16-char hex
   return binaryToHex(hash);
+}
+
+/**
+ * Apply 2D DCT (Discrete Cosine Transform)
+ * First apply 1D DCT to rows, then to columns
+ */
+function applyDCT2D(matrix: number[][]): number[][] {
+  const dct = getDCTMatrix();
+  const size = matrix.length;
+  
+  // Apply DCT to rows
+  const temp: number[][] = [];
+  for (let y = 0; y < size; y++) {
+    const row: number[] = [];
+    for (let k = 0; k < size; k++) {
+      let sum = 0;
+      for (let n = 0; n < size; n++) {
+        sum += matrix[y][n] * dct[k][n];
+      }
+      row.push(sum);
+    }
+    temp.push(row);
+  }
+  
+  // Apply DCT to columns
+  const result: number[][] = [];
+  for (let y = 0; y < size; y++) {
+    const row: number[] = [];
+    for (let x = 0; x < size; x++) {
+      let sum = 0;
+      for (let n = 0; n < size; n++) {
+        sum += temp[n][x] * dct[y][n];
+      }
+      row.push(sum);
+    }
+    result.push(row);
+  }
+  
+  return result;
 }
 
 /**
