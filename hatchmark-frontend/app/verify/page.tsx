@@ -7,6 +7,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import toast from 'react-hot-toast';
 import { Image as ImageIcon, AlertTriangle, CheckCircle, Loader2, Flag, ExternalLink } from 'lucide-react';
 import { computePerceptualHash } from '@/lib/phash';
+import { AIDetectionBadge, type AIDetectionResult } from '@/components/AIDetectionBadge';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
 
@@ -34,15 +35,45 @@ export default function VerifyPage() {
   const [hash, setHash] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  const [aiDetection, setAiDetection] = useState<AIDetectionResult | null>(null);
+  const [isDetectingAI, setIsDetectingAI] = useState(false);
+
+  const detectAI = useCallback(async (file: File) => {
+    setIsDetectingAI(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target?.result?.toString().split(',')[1];
+        if (!base64) return;
+        
+        const res = await fetch('/api/ai-detect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64 }),
+        });
+        const data = await res.json();
+        setAiDetection(data);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('AI detection failed:', error);
+      setAiDetection(null);
+    } finally {
+      setTimeout(() => setIsDetectingAI(false), 500);
+    }
+  }, []);
 
   const onDrop = useCallback(async (files: File[]) => {
     const file = files[0];
     if (!file) return;
 
     setResult(null);
+    setAiDetection(null);
     setPreview(URL.createObjectURL(file));
     const h = await computePerceptualHash(file);
     setHash(h);
+
+    detectAI(file);
 
     setVerifying(true);
     try {
@@ -61,7 +92,7 @@ export default function VerifyPage() {
     } finally {
       setVerifying(false);
     }
-  }, []);
+  }, [detectAI]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -139,6 +170,12 @@ export default function VerifyPage() {
           <div className="flex items-center justify-center gap-2 text-neutral-500 py-8">
             <Loader2 className="w-5 h-5 animate-spin" />
             Verifying...
+          </div>
+        )}
+
+        {(isDetectingAI || aiDetection) && !verifying && (
+          <div className="mb-6">
+            <AIDetectionBadge result={aiDetection} isLoading={isDetectingAI} />
           </div>
         )}
 
