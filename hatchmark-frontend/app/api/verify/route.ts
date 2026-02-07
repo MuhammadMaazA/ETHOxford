@@ -16,35 +16,34 @@ const supabase = createClient(
 /**
  * Compute Hamming distance between two hex strings
  * Returns number of differing bits
+ * 
+ * For perceptual hashes (16 hex chars = 64 bits):
+ * - Distance 0 = identical
+ * - Distance 1-6 = very similar (>90%)
+ * - Distance 7-12 = similar (80-90%)
+ * - Distance 13+ = different
  */
 function hammingDistance(hash1: string, hash2: string): number {
-  // Normalize to lowercase and same length
+  // Normalize to lowercase
   const h1 = hash1.toLowerCase();
   const h2 = hash2.toLowerCase();
   
-  if (h1.length !== h2.length) {
-    // If lengths differ, compare character by character up to shorter length
-    // and count remaining as differences
-    const minLen = Math.min(h1.length, h2.length);
-    let distance = Math.abs(h1.length - h2.length) * 4; // Each hex char = 4 bits
-    
-    for (let i = 0; i < minLen; i++) {
-      const byte1 = parseInt(h1[i], 16);
-      const byte2 = parseInt(h2[i], 16);
-      // Count differing bits using XOR and popcounts
-      let xor = byte1 ^ byte2;
-      while (xor) {
-        distance += xor & 1;
-        xor >>= 1;
-      }
-    }
-    return distance;
+  // If hash lengths are very different, they're incompatible hash types
+  // (e.g., comparing 32-char MD5 to 16-char pHash)
+  if (Math.abs(h1.length - h2.length) > 4) {
+    // Return maximum distance to indicate no match
+    return 64; // Max bits for pHash
   }
   
+  // Pad shorter hash if needed
+  const maxLen = Math.max(h1.length, h2.length);
+  const padded1 = h1.padStart(maxLen, '0');
+  const padded2 = h2.padStart(maxLen, '0');
+  
   let distance = 0;
-  for (let i = 0; i < h1.length; i++) {
-    const byte1 = parseInt(h1[i], 16);
-    const byte2 = parseInt(h2[i], 16);
+  for (let i = 0; i < maxLen; i++) {
+    const byte1 = parseInt(padded1[i], 16);
+    const byte2 = parseInt(padded2[i], 16);
     let xor = byte1 ^ byte2;
     while (xor) {
       distance += xor & 1;
@@ -56,10 +55,16 @@ function hammingDistance(hash1: string, hash2: string): number {
 
 /**
  * Convert Hamming distance to similarity percentage
- * For a 64-char hex hash (256 bits), max distance is 256
+ * For perceptual hash (16-char hex = 64 bits):
+ * - Distance 0 = 100% (identical)
+ * - Distance 6 = 90.6% (similar)
+ * - Distance 12 = 81.3% (somewhat similar)
+ * - Distance 32 = 50% (half different)
+ * - Distance 64 = 0% (completely different)
  */
 function distanceToSimilarity(distance: number, hashLength: number): number {
-  const maxBits = hashLength * 4; // Each hex char = 4 bits
+  // For pHash, we use 64 bits as the max
+  const maxBits = hashLength <= 16 ? 64 : hashLength * 4;
   const similarity = 1 - (distance / maxBits);
   return Math.round(similarity * 100);
 }
@@ -125,7 +130,7 @@ export async function POST(req: Request) {
           hammingDistance: distance
         };
       })
-      .filter((reg: MatchResult) => reg.similarity >= 90) // 90% threshold
+      .filter((reg: MatchResult) => reg.similarity >= 80) // 80% threshold for perceptual hash
       .sort((a: MatchResult, b: MatchResult) => b.similarity - a.similarity);
 
     // Check for exact match

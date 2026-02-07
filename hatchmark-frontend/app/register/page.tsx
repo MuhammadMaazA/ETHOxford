@@ -6,7 +6,7 @@ import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-ki
 import { Transaction } from '@mysten/sui/transactions';
 import toast from 'react-hot-toast';
 import { Upload, Image as ImageIcon, Hash, CheckCircle, Loader2, ExternalLink } from 'lucide-react';
-import md5 from 'blueimp-md5';
+import { computePerceptualHash } from '@/lib/phash';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || 
   '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
@@ -44,7 +44,8 @@ export default function RegisterPage() {
           existingCert: data.exactMatch,
         });
         toast.error('This image is already registered!');
-      } else if (data.matches && data.matches.length > 0 && data.matches[0].similarity >= 95) {
+      } else if (data.matches && data.matches.length > 0 && data.matches[0].similarity >= 90) {
+        // 90%+ similarity with perceptual hash = same image (6 bits or fewer different)
         setDuplicateInfo({
           isDuplicate: true,
           existingCert: data.matches[0],
@@ -62,19 +63,12 @@ export default function RegisterPage() {
     }
   }, []);
 
-  // Compute hash from image
+  // Compute perceptual hash from image
   const computeHash = useCallback(async (file: File) => {
-    return new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = e.target?.result as string;
-        // Use MD5 for simplicity - produces 32 hex chars (128 bits)
-        // In production, use a proper perceptual hash like pHash
-        const hash = md5(data);
-        resolve(hash);
-      };
-      reader.readAsDataURL(file);
-    });
+    // Use perceptual hash (dHash) - produces 16 hex chars (64 bits)
+    // Catches screenshots, crops, resizes, compression
+    const hash = await computePerceptualHash(file);
+    return hash;
   }, []);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
