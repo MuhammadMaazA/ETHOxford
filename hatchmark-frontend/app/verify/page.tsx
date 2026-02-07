@@ -218,16 +218,42 @@ export default function VerifyPage() {
                 </div>
               </div>
             </div>
+          ) : result.exactMatch && account && result.exactMatch.creator === account.address ? (
+            // User is the original creator - show ownership confirmation
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-8 h-8 text-blue-500" />
+                <div>
+                  <h2 className="text-xl font-semibold text-blue-800">
+                    This is YOUR Registered Content ✓
+                  </h2>
+                  <p className="text-blue-700">
+                    You registered &quot;{result.exactMatch.title}&quot; on {formatDate(result.exactMatch.registered_at)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <a
+                  href={`https://suiscan.xyz/testnet/object/${result.exactMatch.cert_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  View Your Certificate on Sui Explorer
+                </a>
+              </div>
+            </div>
           ) : (
             <div className="bg-red-50 border border-red-200 rounded-xl p-6">
               <div className="flex items-center gap-3 mb-4">
                 <AlertTriangle className="w-8 h-8 text-red-500" />
                 <div>
                   <h2 className="text-xl font-semibold text-red-800">
-                    Similar Content Found
+                    Content Already Registered by Someone Else
                   </h2>
                   <p className="text-red-700">
-                    {result.matches.length} match(es) found in the registry
+                    {result.matches.length} match(es) found - if you believe this is YOUR original work, you can flag it
                   </p>
                 </div>
               </div>
@@ -270,7 +296,8 @@ export default function VerifyPage() {
                         <ExternalLink className="w-4 h-4" />
                         View Certificate
                       </a>
-                      {match.similarity >= 90 && account && (
+                      {/* Only show Flag button if user is NOT the creator */}
+                      {match.similarity >= 90 && account && match.creator !== account.address && (
                         <button
                           onClick={() => handleFlag(match)}
                           disabled={isFlagging}
@@ -279,6 +306,12 @@ export default function VerifyPage() {
                           <Flag className="w-4 h-4" />
                           {isFlagging ? 'Filing...' : 'Flag as Stolen'}
                         </button>
+                      )}
+                      {account && match.creator === account.address && (
+                        <span className="flex items-center gap-1 text-sm text-green-600">
+                          <CheckCircle className="w-4 h-4" />
+                          Your Registration
+                        </span>
                       )}
                     </div>
                   </div>
