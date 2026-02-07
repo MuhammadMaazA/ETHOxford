@@ -21,6 +21,46 @@ export default function RegisterPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    isDuplicate: boolean;
+    existingCert?: { title: string; creator: string; registered_at: number };
+  } | null>(null);
+
+  // Check if hash already exists in registry
+  const checkDuplicate = useCallback(async (hash: string) => {
+    setIsChecking(true);
+    try {
+      const res = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash }),
+      });
+      const data = await res.json();
+      
+      if (data.exactMatch) {
+        setDuplicateInfo({
+          isDuplicate: true,
+          existingCert: data.exactMatch,
+        });
+        toast.error('This image is already registered!');
+      } else if (data.matches && data.matches.length > 0 && data.matches[0].similarity >= 95) {
+        setDuplicateInfo({
+          isDuplicate: true,
+          existingCert: data.matches[0],
+        });
+        toast.error('A very similar image is already registered!');
+      } else {
+        setDuplicateInfo({ isDuplicate: false });
+        toast.success('Image is original - ready to register!');
+      }
+    } catch (error) {
+      console.error('Duplicate check failed:', error);
+      setDuplicateInfo({ isDuplicate: false });
+    } finally {
+      setIsChecking(false);
+    }
+  }, []);
 
   // Compute hash from image
   const computeHash = useCallback(async (file: File) => {
@@ -41,6 +81,9 @@ export default function RegisterPage() {
     const file = acceptedFiles[0];
     if (!file) return;
 
+    // Reset duplicate info
+    setDuplicateInfo(null);
+
     // Show preview
     const preview = URL.createObjectURL(file);
     setImagePreview(preview);
@@ -48,8 +91,10 @@ export default function RegisterPage() {
     // Compute hash
     const hash = await computeHash(file);
     setImageHash(hash);
-    toast.success('Image hash computed!');
-  }, [computeHash]);
+    
+    // Check for duplicates
+    await checkDuplicate(hash);
+  }, [computeHash, checkDuplicate]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -79,6 +124,12 @@ export default function RegisterPage() {
 
     if (!title.trim()) {
       toast.error('Please enter a title');
+      return;
+    }
+
+    // Block if duplicate detected
+    if (duplicateInfo?.isDuplicate) {
+      toast.error('Cannot register - this image is already registered!');
       return;
     }
 
@@ -200,6 +251,41 @@ export default function RegisterPage() {
               </code>
             </div>
           )}
+
+          {/* Checking Status */}
+          {isChecking && (
+            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3">
+              <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+              <span className="text-blue-800">Checking if image is already registered...</span>
+            </div>
+          )}
+
+          {/* Duplicate Warning */}
+          {duplicateInfo?.isDuplicate && duplicateInfo.existingCert && (
+            <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-red-800 font-medium mb-2">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <span>This image is already registered!</span>
+              </div>
+              <div className="text-sm text-red-700">
+                <p><strong>Title:</strong> {duplicateInfo.existingCert.title}</p>
+                <p><strong>Registered:</strong> {new Date(duplicateInfo.existingCert.registered_at).toLocaleDateString()}</p>
+                <p className="text-xs mt-2 text-red-600">
+                  Creator: {duplicateInfo.existingCert.creator.slice(0, 10)}...{duplicateInfo.existingCert.creator.slice(-8)}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Original Content Confirmation */}
+          {duplicateInfo && !duplicateInfo.isDuplicate && (
+            <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <span className="text-green-800 font-medium">Image is original - ready to register!</span>
+            </div>
+          )}
         </div>
 
         {/* Form Section */}
@@ -239,7 +325,7 @@ export default function RegisterPage() {
           ) : (
             <button
               onClick={handleRegister}
-              disabled={!imageHash || !title || isPending}
+              disabled={!imageHash || !title || isPending || isChecking || duplicateInfo?.isDuplicate}
               className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-4 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
               {isPending ? (
