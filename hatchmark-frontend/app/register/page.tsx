@@ -40,7 +40,7 @@ export default function RegisterPage() {
       if (data.exactMatch) {
         setDuplicateInfo({ isDuplicate: true, existingCert: data.exactMatch });
         toast.error('This image is already registered!');
-      } else if (data.matches && data.matches.length > 0 && data.matches[0].similarity >= 90) {
+      } else if (data.matches && data.matches.length > 0 && data.matches[0].similarity >= 70) {
         setDuplicateInfo({ isDuplicate: true, existingCert: data.matches[0] });
         toast.error('A very similar image is already registered!');
       } else {

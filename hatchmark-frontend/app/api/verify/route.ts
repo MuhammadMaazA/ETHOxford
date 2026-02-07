@@ -130,7 +130,7 @@ export async function POST(req: Request) {
           hammingDistance: distance
         };
       })
-      .filter((reg: MatchResult) => reg.similarity >= 80) // 80% threshold for perceptual hash
+      .filter((reg: MatchResult) => reg.similarity >= 70) // 70% threshold for perceptual hash
       .sort((a: MatchResult, b: MatchResult) => b.similarity - a.similarity);
 
     // Check for exact match
