@@ -1,10 +1,3 @@
-/**
- * /api/register-local - Immediately insert registration into Supabase
- * 
- * Called after successful blockchain transaction to enable instant duplicate detection
- * (Backup to the blockchain event indexer)
- */
-
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
@@ -15,22 +8,14 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { image_hash, creator, title, description, tx_digest } = body;
+    const { image_hash, creator, title, description, tx_digest } = await req.json();
 
     if (!image_hash || !creator) {
-      return NextResponse.json(
-        { error: 'image_hash and creator are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'image_hash and creator required' }, { status: 400 });
     }
 
-    // Generate a placeholder cert_id (the real one comes from blockchain events)
-    // Using tx_digest as identifier since we don't have the object ID yet
-    const cert_id = `pending_${tx_digest || Date.now()}`;
-
     const registration = {
-      cert_id,
+      cert_id: `pending_${tx_digest || Date.now()}`,
       image_hash,
       creator,
       title: title || '',
@@ -39,39 +24,18 @@ export async function POST(req: Request) {
       registered_at: Date.now(),
     };
 
-    // Upsert - if hash already exists, this will be ignored
     const { error } = await supabase
       .from('registrations')
-      .upsert(registration, { 
-        onConflict: 'image_hash',
-        ignoreDuplicates: true 
-      });
+      .upsert(registration, { onConflict: 'image_hash', ignoreDuplicates: true });
 
-    if (error) {
-      // Duplicate is expected if indexer already synced
-      if (error.code === '23505') {
-        return NextResponse.json({ 
-          success: true, 
-          message: 'Already synced by indexer' 
-        });
-      }
-      console.error('Supabase error:', error);
-      return NextResponse.json(
-        { error: 'Database insert failed' },
-        { status: 500 }
-      );
+    if (error && error.code !== '23505') {
+      console.error('DB error:', error);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Registration cached for instant duplicate detection' 
-    });
-
-  } catch (error) {
-    console.error('Register-local error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Register-local error:', err);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }

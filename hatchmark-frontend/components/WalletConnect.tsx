@@ -11,7 +11,7 @@ export function WalletConnect() {
     return (
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 rounded-lg">
-          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+          <div className="w-2 h-2 bg-green-500 rounded-full" />
           <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             {account.address.slice(0, 6)}...{account.address.slice(-4)}
           </span>
@@ -19,7 +19,6 @@ export function WalletConnect() {
         <button
           onClick={() => disconnect()}
           className="p-2 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-colors"
-          title="Disconnect"
         >
           <LogOut className="w-4 h-4" />
         </button>

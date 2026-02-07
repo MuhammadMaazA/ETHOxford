@@ -1,22 +1,14 @@
-/**
- * Supabase client configuration for Hatchmark
- */
-
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Client-side Supabase client (uses anon key)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(url, anonKey);
 
-// Server-side Supabase client (uses service key for admin operations)
 export function getServerSupabase() {
-  const serviceKey = process.env.SUPABASE_SERVICE_KEY!;
-  return createClient(supabaseUrl, serviceKey);
+  return createClient(url, process.env.SUPABASE_SERVICE_KEY!);
 }
 
-// Database types
 export interface Registration {
   cert_id: string;
   image_hash: string;
@@ -25,7 +17,6 @@ export interface Registration {
   title: string;
   description?: string;
   tx_digest?: string;
-  created_at?: string;
 }
 
 export interface Dispute {
@@ -34,7 +25,6 @@ export interface Dispute {
   flagged_hash: string;
   flagger: string;
   similarity_score: number;
-  status: number; // 0=pending, 1=valid, 2=invalid
+  status: number;
   event_time: number;
-  created_at?: string;
 }

@@ -8,9 +8,7 @@ import toast from 'react-hot-toast';
 import { Image as ImageIcon, AlertTriangle, CheckCircle, Loader2, Flag, ExternalLink } from 'lucide-react';
 import { computePerceptualHash } from '@/lib/phash';
 
-const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || 
-  '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
-const SUI_CLOCK = '0x6';
+const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
 
 interface Match {
   cert_id: string;
@@ -22,60 +20,48 @@ interface Match {
   hammingDistance: number;
 }
 
-interface VerifyResult {
+interface Result {
   matches: Match[];
   isOriginal: boolean;
   exactMatch: Match | null;
-  totalRegistrations: number;
 }
 
 export default function VerifyPage() {
   const account = useCurrentAccount();
-  const { mutate: signAndExecute, isPending: isFlagging } = useSignAndExecuteTransaction();
+  const { mutate: signAndExecute, isPending } = useSignAndExecuteTransaction();
 
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageHash, setImageHash] = useState<string>('');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [result, setResult] = useState<VerifyResult | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [hash, setHash] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [result, setResult] = useState<Result | null>(null);
 
-  const computeHash = useCallback(async (file: File) => {
-    const hash = await computePerceptualHash(file);
-    return hash;
-  }, []);
-
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
+  const onDrop = useCallback(async (files: File[]) => {
+    const file = files[0];
     if (!file) return;
 
     setResult(null);
-    const preview = URL.createObjectURL(file);
-    setImagePreview(preview);
+    setPreview(URL.createObjectURL(file));
+    const h = await computePerceptualHash(file);
+    setHash(h);
 
-    const hash = await computeHash(file);
-    setImageHash(hash);
-
-    setIsVerifying(true);
+    setVerifying(true);
     try {
-      const response = await fetch('/api/verify', {
+      const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash }),
+        body: JSON.stringify({ hash: h }),
       });
-      const data = await response.json();
+      const data = await res.json();
       setResult(data);
-
-      if (data.isOriginal) {
-        toast.success('This appears to be original content!');
-      } else {
-        toast.error(`Found ${data.matches.length} similar content(s)!`);
-      }
-    } catch (error) {
-      console.error('Verification failed:', error);
+      
+      if (data.isOriginal) toast.success('Original content!');
+      else toast.error(`Found ${data.matches.length} match(es)`);
+    } catch {
       toast.error('Verification failed');
     } finally {
-      setIsVerifying(false);
+      setVerifying(false);
     }
-  }, [computeHash]);
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -91,231 +77,140 @@ export default function VerifyPage() {
     return bytes;
   };
 
-  const handleFlag = async (match: Match) => {
-    if (!account) {
-      toast.error('Please connect your wallet to flag content');
-      return;
-    }
+  const handleFlag = (match: Match) => {
+    if (!account) return toast.error('Connect wallet to flag');
 
-    try {
-      const tx = new Transaction();
-      const hashBytes = hexToBytes(imageHash);
-      const similarityScore = Math.min(255, match.hammingDistance);
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${PACKAGE_ID}::registry::flag_content`,
+      arguments: [
+        tx.object(match.cert_id),
+        tx.pure.vector('u8', hexToBytes(hash)),
+        tx.pure.u8(Math.min(255, match.hammingDistance)),
+        tx.object('0x6'),
+      ],
+    });
 
-      tx.moveCall({
-        target: `${PACKAGE_ID}::registry::flag_content`,
-        arguments: [
-          tx.object(match.cert_id),
-          tx.pure.vector('u8', hashBytes),
-          tx.pure.u8(similarityScore),
-          tx.object(SUI_CLOCK),
-        ],
-      });
-
-      signAndExecute(
-        { transaction: tx },
-        {
-          onSuccess: () => {
-            toast.success('Dispute filed successfully!');
-          },
-          onError: (error) => {
-            console.error('Flag failed:', error);
-            toast.error('Failed to file dispute: ' + error.message);
-          },
-        }
-      );
-    } catch (error) {
-      console.error('Error flagging:', error);
-      toast.error('Failed to build transaction');
-    }
-  };
-
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    signAndExecute({ transaction: tx }, {
+      onSuccess: () => toast.success('Dispute filed'),
+      onError: (err) => toast.error('Failed: ' + err.message),
     });
   };
+
+  const formatDate = (ts: number) => new Date(ts).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric'
+  });
 
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950">
       <div className="max-w-3xl mx-auto px-4 py-16">
         <div className="mb-12">
-          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white mb-2">
-            Verify Content
-          </h1>
-          <p className="text-neutral-500 dark:text-neutral-400">
-            Check if an image has been registered on the blockchain
-          </p>
+          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white mb-2">Verify Content</h1>
+          <p className="text-neutral-500">Check if an image has been registered</p>
         </div>
 
         <div
           {...getRootProps()}
-          className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 mb-8 ${
+          className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-colors mb-8 ${
             isDragActive
-              ? 'border-neutral-900 dark:border-white bg-neutral-50 dark:bg-neutral-900'
-              : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-600'
+              ? 'border-neutral-400 bg-neutral-100 dark:bg-neutral-900'
+              : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
           }`}
         >
           <input {...getInputProps()} />
-          {imagePreview ? (
-            <div className="space-y-4">
-              <img
-                src={imagePreview}
-                alt="Preview"
-                className="max-h-48 mx-auto rounded-lg"
-              />
-              <p className="text-sm text-neutral-500">Click or drag to check another image</p>
-            </div>
+          {preview ? (
+            <img src={preview} alt="Preview" className="max-h-64 mx-auto rounded-lg" />
           ) : (
-            <div className="space-y-4">
-              <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto">
-                <ImageIcon className="w-6 h-6 text-neutral-400" />
-              </div>
-              <div>
-                <p className="text-neutral-700 dark:text-neutral-300 font-medium">
-                  Drop an image to verify
-                </p>
-                <p className="text-sm text-neutral-500 mt-1">
-                  or click to browse
-                </p>
-              </div>
+            <div className="py-8">
+              <ImageIcon className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
+              <p className="text-neutral-600 dark:text-neutral-400">Drop image here or click to upload</p>
             </div>
           )}
         </div>
 
-        {isVerifying && (
-          <div className="bg-neutral-50 dark:bg-neutral-900 rounded-2xl p-8 text-center border border-neutral-200 dark:border-neutral-800">
-            <Loader2 className="w-8 h-8 animate-spin text-neutral-400 mx-auto mb-3" />
-            <p className="text-neutral-600 dark:text-neutral-400">Checking registry...</p>
+        {hash && (
+          <div className="mb-8 p-4 bg-neutral-50 dark:bg-neutral-900 rounded-xl">
+            <p className="text-xs text-neutral-500 mb-1">Hash</p>
+            <code className="text-sm font-mono text-neutral-700 dark:text-neutral-300">{hash}</code>
           </div>
         )}
 
-        {result && !isVerifying && (
+        {verifying && (
+          <div className="flex items-center justify-center gap-2 text-neutral-500 py-8">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Verifying...
+          </div>
+        )}
+
+        {result && !verifying && (
           <div className="space-y-6">
             {result.isOriginal ? (
-              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-green-100 dark:bg-green-500/20 rounded-full flex items-center justify-center">
-                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div>
-                    <h2 className="font-semibold text-neutral-900 dark:text-white">
-                      Original Content
-                    </h2>
-                    <p className="text-sm text-neutral-500">
-                      No matches found in {result.totalRegistrations} registrations
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : result.exactMatch && account && result.exactMatch.creator === account.address ? (
-              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-neutral-200 dark:bg-neutral-800 rounded-full flex items-center justify-center">
-                    <CheckCircle className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
-                  </div>
-                  <div>
-                    <h2 className="font-semibold text-neutral-900 dark:text-white">
-                      Your Registration
-                    </h2>
-                    <p className="text-sm text-neutral-500">
-                      &quot;{result.exactMatch.title}&quot; • {formatDate(result.exactMatch.registered_at)}
-                    </p>
-                  </div>
-                </div>
-                <a
-                  href={`https://suiscan.xyz/testnet/object/${result.exactMatch.cert_id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  View on Explorer
-                </a>
+              <div className="p-6 bg-green-50 dark:bg-green-900/20 rounded-2xl border border-green-200 dark:border-green-800 text-center">
+                <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400 mx-auto mb-3" />
+                <h3 className="text-lg font-medium text-green-800 dark:text-green-300">Original Content</h3>
+                <p className="text-green-600 dark:text-green-400 text-sm mt-1">No matches found in registry</p>
               </div>
             ) : (
-              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 bg-red-100 dark:bg-red-500/20 rounded-full flex items-center justify-center">
-                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
-                  </div>
+              <>
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border border-yellow-200 dark:border-yellow-800 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h2 className="font-semibold text-neutral-900 dark:text-white">
-                      Already Registered
-                    </h2>
-                    <p className="text-sm text-neutral-500">
-                      {result.matches.length} match(es) found
-                    </p>
+                    <h3 className="font-medium text-yellow-800 dark:text-yellow-300">Matches Found</h3>
+                    <p className="text-yellow-700 dark:text-yellow-400 text-sm">{result.matches.length} similar content(s)</p>
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  {result.matches.map((match) => (
-                    <div
-                      key={match.cert_id}
-                      className="bg-white dark:bg-neutral-950 rounded-xl p-4 border border-neutral-200 dark:border-neutral-800"
-                    >
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h3 className="font-medium text-neutral-900 dark:text-white">{match.title}</h3>
-                          <p className="text-sm text-neutral-500 mt-1">
-                            {formatDate(match.registered_at)}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <span className={`text-lg font-semibold ${
-                            match.similarity >= 95 ? 'text-red-600 dark:text-red-400' :
-                            match.similarity >= 90 ? 'text-orange-600 dark:text-orange-400' : 
-                            'text-yellow-600 dark:text-yellow-400'
+                <div className="space-y-4">
+                  {result.matches.map((match) => {
+                    const isOwn = account?.address === match.creator;
+                    return (
+                      <div key={match.cert_id} className="p-5 bg-neutral-50 dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h4 className="font-medium text-neutral-900 dark:text-white">{match.title}</h4>
+                            <p className="text-sm text-neutral-500">{formatDate(match.registered_at)}</p>
+                          </div>
+                          <span className={`px-2 py-1 rounded-lg text-sm font-medium ${
+                            match.similarity >= 95
+                              ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                              : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
                           }`}>
-                            {match.similarity}%
+                            {match.similarity}% match
                           </span>
-                          <p className="text-xs text-neutral-500">match</p>
+                        </div>
+
+                        <p className="text-xs text-neutral-500 mb-3 font-mono">
+                          {match.creator.slice(0, 12)}...{match.creator.slice(-8)}
+                        </p>
+
+                        <div className="flex gap-2">
+                          <a
+                            href={`https://suiscan.xyz/testnet/object/${match.cert_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            View <ExternalLink className="w-3 h-3" />
+                          </a>
+                          {!isOwn && (
+                            <button
+                              onClick={() => handleFlag(match)}
+                              disabled={isPending}
+                              className="flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                            >
+                              <Flag className="w-3 h-3" />
+                              {isPending ? 'Filing...' : 'Dispute'}
+                            </button>
+                          )}
+                          {isOwn && (
+                            <span className="text-sm text-green-600 dark:text-green-400">Your content</span>
+                          )}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <a
-                          href={`https://suiscan.xyz/testnet/object/${match.cert_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          View
-                        </a>
-                        {match.similarity >= 90 && account && match.creator !== account.address && (
-                          <button
-                            onClick={() => handleFlag(match)}
-                            disabled={isFlagging}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-500/30 transition-colors disabled:opacity-50"
-                          >
-                            <Flag className="w-3 h-3" />
-                            {isFlagging ? 'Filing...' : 'Flag'}
-                          </button>
-                        )}
-                        {account && match.creator === account.address && (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 rounded-lg">
-                            <CheckCircle className="w-3 h-3" />
-                            Yours
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
-              </div>
-            )}
-
-            {imageHash && (
-              <div className="bg-neutral-50 dark:bg-neutral-900 rounded-xl p-4 border border-neutral-200 dark:border-neutral-800">
-                <p className="text-xs text-neutral-500 mb-1">Content Hash</p>
-                <code className="text-xs text-neutral-700 dark:text-neutral-300 font-mono break-all">
-                  {imageHash}
-                </code>
-              </div>
+              </>
             )}
           </div>
         )}
