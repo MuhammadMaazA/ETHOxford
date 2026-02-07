@@ -144,9 +144,28 @@ export default function RegisterPage() {
       signAndExecute(
         { transaction: tx },
         {
-          onSuccess: (result) => {
+          onSuccess: async (result) => {
             setTxDigest(result.digest);
             toast.success('Content registered successfully!');
+            
+            // Immediately insert into Supabase for instant duplicate detection
+            // (The indexer will also sync, but upsert will handle duplicates)
+            try {
+              await fetch('/api/register-local', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  image_hash: imageHash,
+                  creator: account?.address,
+                  title: title,
+                  description: description,
+                  tx_digest: result.digest,
+                }),
+              });
+            } catch (e) {
+              // Non-critical - indexer will sync eventually
+              console.log('Local sync skipped:', e);
+            }
           },
           onError: (error) => {
             console.error('Transaction failed:', error);
