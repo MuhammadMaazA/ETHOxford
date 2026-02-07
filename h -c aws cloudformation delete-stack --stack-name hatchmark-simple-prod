@@ -1,0 +1,52 @@
+{
+    "AttachedPolicies": [
+        {
+            "PolicyName": "AmazonEC2ContainerRegistryFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
+        },
+        {
+            "PolicyName": "IAMFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/IAMFullAccess"
+        },
+        {
+            "PolicyName": "AmazonECS_FullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonECS_FullAccess"
+        },
+        {
+            "PolicyName": "AmazonSQSFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+        },
+        {
+            "PolicyName": "AWSXRayDaemonWriteAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+        },
+        {
+            "PolicyName": "AmazonAPIGatewayInvokeFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonAPIGatewayInvokeFullAccess"
+        },
+        {
+            "PolicyName": "AWSStepFunctionsFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess"
+        },
+        {
+            "PolicyName": "AmazonDynamoDBFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+        },
+        {
+            "PolicyName": "AmazonS3FullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        },
+        {
+            "PolicyName": "AmazonQLDBFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonQLDBFullAccess"
+        },
+        {
+            "PolicyName": "AWSCloudFormationFullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AWSCloudFormationFullAccess"
+        },
+        {
+            "PolicyName": "AWSLambda_FullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AWSLambda_FullAccess"
+        }
+    ]
+}

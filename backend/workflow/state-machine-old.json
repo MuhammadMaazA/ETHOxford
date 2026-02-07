@@ -1,0 +1,284 @@
+{
+  "Comment": "Hatchmark Watermarking and Processing Workflow",
+  "StartAt": "HashGeneration",
+  "States": {
+    "HashGeneration": {
+      "Type": "Task",
+      "Resource": "${HashFunctionArn}",
+      "Comment": "Generate perceptual hash for uploaded file",
+      "InputPath": "$",
+      "Next": "DynamoDBWrite",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailureNotification",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "DynamoDBWrite": {
+      "Type": "Task",
+      "Resource": "${DynamoDBWriteFunctionArn}",
+      "Comment": "Store asset metadata and hash in DynamoDB",
+      "InputPath": "$",
+      "Next": "QueueWatermarking",
+      "Retry": [
+        {
+          "ErrorEquals": ["DynamoDB.ServiceException", "DynamoDB.ProvisionedThroughputExceededException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailureNotification",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "QueueWatermarking": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "${WatermarkingQueueUrl}",
+        "MessageBody.$": "$",
+        "MessageGroupId": "watermarking-group"
+      },
+      "Comment": "Queue file for watermarking processing",
+      "Next": "ProcessingComplete",
+      "Retry": [
+        {
+          "ErrorEquals": ["SQS.ServiceException", "SQS.SdkClientException"],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailureNotification",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "ProcessingComplete": {
+      "Type": "Succeed",
+      "Comment": "File successfully queued for watermarking"
+    },
+    "FailureNotification": {
+      "Type": "Fail",
+      "Comment": "Processing failed",
+      "Cause": "Error in Hatchmark processing workflow"
+    }
+  }
+}
+  "States": {
+    "ComputePerceptualHash": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${HashFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "perceptualHash.$": "$.Payload.perceptualHash",
+        "objectKey.$": "$.Payload.objectKey",
+        "bucket.$": "$.Payload.bucket",
+        "imageMetadata.$": "$.Payload.imageMetadata",
+        "additionalHashes.$": "$.Payload.additionalHashes"
+      },
+      "ResultPath": "$.hashResult",
+      "Next": "WriteToLedger",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "Next": "HashingFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    
+    "WriteToLedger": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${LedgerFunctionArn}",
+        "Payload": {
+          "perceptualHash.$": "$.hashResult.perceptualHash",
+          "objectKey.$": "$.hashResult.objectKey",
+          "bucket.$": "$.hashResult.bucket",
+          "imageMetadata.$": "$.hashResult.imageMetadata",
+          "additionalHashes.$": "$.hashResult.additionalHashes"
+        }
+      },
+      "ResultSelector": {
+        "assetId.$": "$.Payload.assetId",
+        "perceptualHash.$": "$.Payload.perceptualHash",
+        "status.$": "$.Payload.status",
+        "timestamp.$": "$.Payload.timestamp",
+        "isDuplicate.$": "$.Payload.isDuplicate"
+      },
+      "ResultPath": "$.ledgerResult",
+      "Next": "CheckIfDuplicate",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "Next": "LedgerWriteFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "CheckIfDuplicate": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.ledgerResult.isDuplicate",
+          "BooleanEquals": true,
+          "Next": "DuplicateDetected"
+        }
+      ],
+      "Default": "SendToWatermarkingQueue"
+    },
+
+    "DuplicateDetected": {
+      "Type": "Pass",
+      "Result": {
+        "status": "DUPLICATE_DETECTED",
+        "message": "Asset already exists in the ledger"
+      },
+      "ResultPath": "$.result",
+      "Next": "WorkflowComplete"
+    },
+
+    "SendToWatermarkingQueue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "${WatermarkingQueueUrl}",
+        "MessageBody": {
+          "assetId.$": "$.ledgerResult.assetId",
+          "objectKey.$": "$.hashResult.objectKey",
+          "bucket.$": "$.hashResult.bucket",
+          "perceptualHash.$": "$.hashResult.perceptualHash",
+          "timestamp.$": "$.ledgerResult.timestamp",
+          "imageMetadata.$": "$.hashResult.imageMetadata"
+        },
+        "MessageAttributes": {
+          "AssetId": {
+            "DataType": "String",
+            "StringValue.$": "$.ledgerResult.assetId"
+          },
+          "ProcessingType": {
+            "DataType": "String", 
+            "StringValue": "WATERMARKING"
+          }
+        }
+      },
+      "ResultPath": "$.queueResult",
+      "Next": "WatermarkingQueued",
+      "Retry": [
+        {
+          "ErrorEquals": ["Sqs.SqsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "Next": "QueueingFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "WatermarkingQueued": {
+      "Type": "Pass",
+      "Result": {
+        "status": "SUCCESS", 
+        "message": "Asset successfully registered and queued for watermarking"
+      },
+      "ResultPath": "$.result",
+      "Next": "WorkflowComplete"
+    },
+
+    "WorkflowComplete": {
+      "Type": "Pass",
+      "Parameters": {
+        "workflowId.$": "$$.Execution.Name",
+        "assetId.$": "$.ledgerResult.assetId",
+        "status.$": "$.result.status",
+        "message.$": "$.result.message",
+        "timestamp.$": "$$.State.EnteredTime",
+        "processingDetails": {
+          "perceptualHash.$": "$.hashResult.perceptualHash",
+          "originalObjectKey.$": "$.hashResult.objectKey",
+          "registrationTimestamp.$": "$.ledgerResult.timestamp"
+        }
+      },
+      "End": true
+    },
+
+    "HashingFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "status": "FAILED",
+        "stage": "HASHING",
+        "message": "Failed to compute perceptual hash",
+        "error.$": "$.error"
+      },
+      "End": true
+    },
+
+    "LedgerWriteFailed": {
+      "Type": "Pass", 
+      "Parameters": {
+        "status": "FAILED",
+        "stage": "LEDGER_WRITE",
+        "message": "Failed to write to ledger",
+        "error.$": "$.error"
+      },
+      "End": true
+    },
+
+    "QueueingFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "status": "FAILED", 
+        "stage": "WATERMARKING_QUEUE",
+        "message": "Failed to queue for watermarking",
+        "error.$": "$.error"
+      },
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "vercel_url": "https://hatchmark-frontend.vercel.app",
+  "timestamp": "2025-09-03 06:47:52",
+  "overall_success": true,
+  "test_results": [
+    {
+      "test": "Frontend Accessibility",
+      "success": false,
+      "message": "Frontend returned status 404",
+      "details": {}
+    },
+    {
+      "test": "Lambda Function - generate_url",
+      "success": true,
+      "message": "Function hatchmark-generate-url-dev is accessible",
+      "details": {}
+    },
+    {
+      "test": "Lambda Function - register_asset",
+      "success": true,
+      "message": "Function hatchmark-register-asset-dev is accessible",
+      "details": {}
+    },
+    {
+      "test": "Lambda Function - verify_artwork",
+      "success": true,
+      "message": "Function hatchmark-verify-artwork-dev is accessible",
+      "details": {}
+    },
+    {
+      "test": "Lambda Invocation - Generate URL",
+      "success": false,
+      "message": "Failed to invoke Generate URL function",
+      "details": {
+        "error": "\nError parsing parameter '--payload': Unable to load paramfile file://C:UsersmmaazAppDataLocalTemptmpt25_2ri0.json: [Errno 2] No such file or directory: 'C:UsersmmaazAppDataLocalTemptmpt25_2ri0.json'\n"
+      }
+    },
+    {
+      "test": "AWS Resource - Ingestion Bucket",
+      "success": true,
+      "message": "Bucket hatchmark-ingestion-bucket-dev-581150859000 is accessible",
+      "details": {}
+    },
+    {
+      "test": "AWS Resource - Processed Bucket",
+      "success": true,
+      "message": "Bucket hatchmark-processed-bucket-dev-581150859000 is accessible",
+      "details": {}
+    },
+    {
+      "test": "AWS Resource - DynamoDB Table",
+      "success": true,
+      "message": "DynamoDB table hatchmark-assets-dev is accessible",
+      "details": {}
+    }
+  ]
+}

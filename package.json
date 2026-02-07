@@ -1,0 +1,21 @@
+{
+  "name": "hatchmark-authenticity-service",
+  "version": "1.0.0",
+  "description": "Monorepo for Hatchmark digital authenticity service with Next.js frontend and AWS SAM backend",
+  "main": "index.js",
+  "scripts": {
+    "frontend:dev": "cd frontend && npm run dev",
+    "frontend:build": "cd frontend && npm run build",
+    "build": "cd frontend && npm install && npm run build",
+    "start": "cd frontend && npm start",
+    "backend:build": "cd backend && sam build --use-container",
+    "backend:deploy": "cd backend && sam deploy --guided",
+    "deploy:all": "npm run backend:build && npm run backend:deploy && npm run frontend:build"
+  },
+  "keywords": ["authenticity", "aws", "nextjs", "watermarking"],
+  "author": "Hatchmark Team",
+  "license": "MIT",
+  "workspaces": [
+    "frontend"
+  ]
+}

@@ -1,0 +1,87 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# AWS CLI
+aws/
+awscliv2.zip
+
+# Node dependencies
+node_modules/
+bun.lockb
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+backend/.env
+
+# AWS Credentials & Config 
+.aws/
+aws-exports.js
+amplify-meta.json
+awsconfiguration.json
+amplifyconfiguration.json
+
+# AWS SAM sensitive files
+backend/samconfig.toml
+backend/template.yaml
+backend/packaged-template.yaml
+deployment/cloudformation-template.yaml
+
+# API Keys and Secrets
+config/secrets.json
+secrets/
+*.pem
+*.key
+*.crt
+
+# Lambda deployment packages
+*.zip
+layer.zip
+
+# Frontend builds
+frontend/.next/
+frontend/out/
+frontend/dist/
+
+# AWS SAM
+backend/.aws-sam/
+*.zip
+packaged-template.yaml
+
+# Vercel
+.vercel
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local development
+*.local

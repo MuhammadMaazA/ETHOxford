@@ -1,0 +1,85 @@
+{
+  "Comment": "Hatchmark Watermarking and Processing Workflow",
+  "StartAt": "HashGeneration",
+  "States": {
+    "HashGeneration": {
+      "Type": "Task",
+      "Resource": "${HashFunctionArn}",
+      "Comment": "Generate perceptual hash for uploaded file",
+      "InputPath": "$",
+      "Next": "DynamoDBWrite",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailureNotification",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "DynamoDBWrite": {
+      "Type": "Task",
+      "Resource": "${DynamoDBWriteFunctionArn}",
+      "Comment": "Store asset metadata and hash in DynamoDB",
+      "InputPath": "$",
+      "Next": "QueueWatermarking",
+      "Retry": [
+        {
+          "ErrorEquals": ["DynamoDB.ServiceException", "DynamoDB.ProvisionedThroughputExceededException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailureNotification",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "QueueWatermarking": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "${WatermarkingQueueUrl}",
+        "MessageBody.$": "$",
+        "MessageGroupId": "watermarking-group"
+      },
+      "Comment": "Queue file for watermarking processing",
+      "Next": "ProcessingComplete",
+      "Retry": [
+        {
+          "ErrorEquals": ["SQS.ServiceException", "SQS.SdkClientException"],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailureNotification",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "ProcessingComplete": {
+      "Type": "Succeed",
+      "Comment": "File successfully queued for watermarking"
+    },
+    "FailureNotification": {
+      "Type": "Fail",
+      "Comment": "Processing failed",
+      "Cause": "Error in Hatchmark processing workflow"
+    }
+  }
+}

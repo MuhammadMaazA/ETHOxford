@@ -1,0 +1,863 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Hatchmark Digital Authenticity Service - Complete SAM Application
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.11
+    Environment:
+      Variables:
+        PYTHONPATH: /opt/python
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+Resources:
+  # S3 Buckets
+  IngestionBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'hatchmark-ingestion-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'hatchmark-processed-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # DynamoDB Table
+  AssetsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'hatchmark-assets-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: assetId
+          AttributeType: S
+        - AttributeName: perceptualHash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: assetId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: PerceptualHashIndex
+          KeySchema:
+            - AttributeName: perceptualHash
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # SQS Queue
+  WatermarkingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'hatchmark-watermarking-${Environment}'
+      VisibilityTimeoutSeconds: 900
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+
+  # Lambda Functions
+  GeneratePresignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'hatchmark-generate-url-${Environment}'
+      CodeUri: src/handlers/
+      Handler: generate_presigned_url.lambda_handler
+      Environment:
+        Variables:
+          INGESTION_BUCKET: !Ref IngestionBucket
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref IngestionBucket
+      Events:
+        HttpPost:
+          Type: HttpApi
+          Properties:
+            Path: /uploads/initiate
+            Method: POST
+            CorsConfiguration:
+              AllowOrigins: 
+                - "http://localhost:3000"
+                - "https://*.vercel.app"
+                - "https://*.hatchmark.io"
+              AllowHeaders: 
+                - "Content-Type"
+                - "Authorization"
+              AllowMethods: 
+                - "POST"
+                - "OPTIONS"
+
+  HashFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'hatchmark-hash-${Environment}'
+      CodeUri: src/handlers/
+      Handler: hashing_handler.lambda_handler
+      Timeout: 60
+      Environment:
+        Variables:
+          INGESTION_BUCKET: !Ref IngestionBucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref IngestionBucket
+
+  DynamoDBWriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'hatchmark-dynamodb-write-${Environment}'
+      CodeUri: src/handlers/
+      Handler: dynamodb_write_handler.lambda_handler
+      Environment:
+        Variables:
+          ASSETS_TABLE: !Ref AssetsTable
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref AssetsTable
+
+  VerificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'hatchmark-verify-${Environment}'
+      CodeUri: src/handlers/
+      Handler: verification_handler.lambda_handler
+      Environment:
+        Variables:
+          ASSETS_TABLE: !Ref AssetsTable
+          PROCESSED_BUCKET: !Ref ProcessedBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AssetsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ProcessedBucket
+      Events:
+        HttpPost:
+          Type: HttpApi
+          Properties:
+            Path: /verify
+            Method: POST
+            CorsConfiguration:
+              AllowOrigins: 
+                - "http://localhost:3000"
+                - "https://*.vercel.app"
+                - "https://*.hatchmark.io"
+              AllowHeaders: 
+                - "Content-Type"
+                - "Authorization"
+              AllowMethods: 
+                - "POST"
+                - "OPTIONS"
+
+  # Step Functions State Machine
+  HatchmarkWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub 'HatchmarkWorkflow-${Environment}'
+      DefinitionUri: workflow/state-machine.json
+      DefinitionSubstitutions:
+        HashFunctionArn: !GetAtt HashFunction.Arn
+        DynamoDBWriteFunctionArn: !GetAtt DynamoDBWriteFunction.Arn
+        WatermarkingQueueUrl: !Ref WatermarkingQueue
+      Events:
+        S3ObjectCreated:
+          Type: S3
+          Properties:
+            Bucket: !Ref IngestionBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref HashFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref DynamoDBWriteFunction
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt WatermarkingQueue.QueueName
+
+  # ECS Resources for Fargate
+  HatchmarkCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'hatchmark-cluster-${Environment}'
+
+  FargateTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WatermarkingTaskPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt WatermarkingQueue.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${IngestionBucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${ProcessedBucket}/*'
+
+  WatermarkingTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'hatchmark-watermarker-${Environment}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole'
+      TaskRoleArn: !Ref FargateTaskRole
+      ContainerDefinitions:
+        - Name: watermarker
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/hatchmark-watermarker:latest'
+          Environment:
+            - Name: SQS_QUEUE_URL
+              Value: !Ref WatermarkingQueue
+            - Name: INGESTION_BUCKET
+              Value: !Ref IngestionBucket
+            - Name: PROCESSED_BUCKET
+              Value: !Ref ProcessedBucket
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AWS::Region
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WatermarkerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  WatermarkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ecs/hatchmark-watermarker-${Environment}'
+      RetentionInDays: 14
+
+Outputs:
+  HttpApiUrl:
+    Description: "HTTP API Gateway endpoint URL"
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Export:
+      Name: !Sub "${AWS::StackName}-HttpApiUrl"
+  
+  IngestionBucketName:
+    Description: "S3 bucket for file ingestion"
+    Value: !Ref IngestionBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-IngestionBucket"
+  
+  ProcessedBucketName:
+    Description: "S3 bucket for processed files"
+    Value: !Ref ProcessedBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ProcessedBucket"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${HatchmarkIngestionBucket}/uploads/*'
+  
+  HatchmarkHashRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HatchmarkHashRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3ReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${HatchmarkIngestionBucket}/*'
+
+  
+  HatchmarkLedgerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HatchmarkLedgerRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: 
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/hatchmark-assets'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/hatchmark-assets/index/*'
+        - PolicyName: SQSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt HatchmarkWatermarkingQueue.Arn
+  
+  HatchmarkVerificationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HatchmarkVerificationRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: 
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/hatchmark-assets'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/hatchmark-assets/index/*'
+        - PolicyName: S3ReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${HatchmarkProcessedBucket}/*'
+
+  # ========================================================================
+# LAMBDA FUNCTIONS
+# ========================================================================
+  
+  HatchmarkGenerateUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: hatchmark-generate-url
+      CodeUri: src/handlers/
+      Handler: generate_presigned_url.lambda_handler
+      Description: Generate presigned URLs for secure S3 uploads
+      Role: !GetAtt HatchmarkGenerateUrlRole.Arn
+      Environment:
+        Variables:
+          INGESTION_BUCKET: !Ref IngestionBucketName
+      Events:
+        UploadInitiate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HatchmarkHttpApi
+            Path: /uploads/initiate
+            Method: POST
+  
+  HatchmarkHashFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: hatchmark-hash-function
+      CodeUri: src/handlers/
+      Handler: hashing_handler.lambda_handler
+      Description: Compute perceptual hash of uploaded images
+      Timeout: 60
+      MemorySize: 512
+      Role: !GetAtt HatchmarkHashRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+
+  
+  HatchmarkLedgerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: hatchmark-ledger-function
+      CodeUri: src/handlers/
+      Handler: ledger_handler.lambda_handler
+      Description: Write registration data to DynamoDB ledger
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt HatchmarkLedgerRole.Arn
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: hatchmark-assets
+          LOG_LEVEL: INFO
+  
+  HatchmarkVerificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: hatchmark-verification-function
+      CodeUri: src/handlers/
+      Handler: verification_handler.lambda_handler
+      Description: Verify artwork authenticity
+      Timeout: 60
+      MemorySize: 512
+      Role: !GetAtt HatchmarkVerificationRole.Arn
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: hatchmark-assets
+          PROCESSED_BUCKET: !Ref ProcessedBucketName
+          LOG_LEVEL: INFO
+      Events:
+        VerifyArtwork:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HatchmarkHttpApi
+            Path: /verify
+            Method: POST
+
+  # ========================================================================
+  # S3 BUCKETS
+  # ========================================================================
+  
+  HatchmarkIngestionBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref IngestionBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  
+  HatchmarkProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ProcessedBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  
+  # ========================================================================
+  # DYNAMODB TABLE (REPLACING QLDB)
+  # ========================================================================
+  
+  HatchmarkAssetsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: hatchmark-assets
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: assetId
+          AttributeType: S
+        - AttributeName: perceptualHash
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: assetId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: PerceptualHashIndex
+          KeySchema:
+            - AttributeName: perceptualHash
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: TimestampIndex
+          KeySchema:
+            - AttributeName: timestamp
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: Hatchmark
+        - Key: Environment
+          Value: !Ref AWS::StackName
+  
+  # ========================================================================
+  # SQS QUEUE
+  # ========================================================================
+  
+  HatchmarkWatermarkingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: hatchmark-watermarking-queue
+      VisibilityTimeout: 900  # 15 minutes
+      MessageRetentionPeriod: 1209600  # 14 days
+      ReceiveMessageWaitTimeSeconds: 20  # Long polling
+  
+  # ========================================================================
+  # STEP FUNCTIONS
+  # ========================================================================
+  
+  HatchmarkStepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HatchmarkStepFunctionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt HatchmarkHashFunction.Arn
+                  - !GetAtt HatchmarkLedgerFunction.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt HatchmarkWatermarkingQueue.Arn
+  
+  HatchmarkStepFunction:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: hatchmark-notarization-workflow
+      RoleArn: !GetAtt HatchmarkStepFunctionRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Hatchmark Notarization Pipeline",
+          "StartAt": "ComputePerceptualHash",
+          "States": {
+            "ComputePerceptualHash": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${HatchmarkHashFunction}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.hashResult",
+              "Next": "WriteToLedger",
+              "Retry": [
+                {
+                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2.0
+                }
+              ]
+            },
+            "WriteToLedger": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${HatchmarkLedgerFunction}",
+                "Payload": {
+                  "bucketName.$": "$.hashResult.Payload.bucketName",
+                  "objectKey.$": "$.hashResult.Payload.objectKey",
+                  "perceptualHash.$": "$.hashResult.Payload.perceptualHash",
+                  "timestamp.$": "$.hashResult.Payload.timestamp",
+                  "imageWidth.$": "$.hashResult.Payload.imageWidth",
+                  "imageHeight.$": "$.hashResult.Payload.imageHeight",
+                  "imageFormat.$": "$.hashResult.Payload.imageFormat",
+                  "algorithm.$": "$.hashResult.Payload.algorithm"
+                }
+              },
+              "ResultPath": "$.ledgerResult",
+              "Next": "SendToWatermarkingQueue",
+              "Retry": [
+                {
+                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2.0
+                }
+              ]
+            },
+            "SendToWatermarkingQueue": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sqs:sendMessage",
+              "Parameters": {
+                "QueueUrl": "${HatchmarkWatermarkingQueue}",
+                "MessageBody": {
+                  "objectKey.$": "$.hashResult.Payload.objectKey",
+                  "assetId.$": "$.ledgerResult.Payload.assetId",
+                  "documentId.$": "$.ledgerResult.Payload.documentId",
+                  "bucketName.$": "$.hashResult.Payload.bucketName"
+                }
+              },
+              "Next": "NotarizedSuccess"
+            },
+            "NotarizedSuccess": {
+              "Type": "Succeed",
+              "Result": {
+                "status": "SUCCESS",
+                "message": "Image successfully notarized and queued for watermarking"
+              }
+            }
+          }
+        }
+  
+  # ========================================================================
+  # ECS/FARGATE RESOURCES
+  # ========================================================================
+  
+  HatchmarkECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: hatchmark-cluster
+  
+  HatchmarkTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HatchmarkTaskRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SQSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt HatchmarkWatermarkingQueue.Arn
+        - PolicyName: S3Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${HatchmarkIngestionBucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${HatchmarkProcessedBucket}/*'
+  
+  HatchmarkExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HatchmarkExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  
+  HatchmarkTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: hatchmark-watermarker
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 1024
+      Memory: 2048
+      ExecutionRoleArn: !GetAtt HatchmarkExecutionRole.Arn
+      TaskRoleArn: !GetAtt HatchmarkTaskRole.Arn
+      ContainerDefinitions:
+        - Name: watermarker
+          # Note: You'll need to build and push the image to ECR first
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/hatchmark-watermarker:latest'
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref HatchmarkLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: watermarker
+          Environment:
+            - Name: SQS_QUEUE_URL
+              Value: !Ref HatchmarkWatermarkingQueue
+            - Name: INGESTION_BUCKET
+              Value: !Ref IngestionBucketName
+            - Name: PROCESSED_BUCKET
+              Value: !Ref ProcessedBucketName
+  
+  HatchmarkLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/hatchmark-watermarker
+      RetentionInDays: 14
+  
+  # ========================================================================
+  # API GATEWAY
+  # ========================================================================
+  
+  HatchmarkHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Hatchmark Digital Authenticity Service API
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        MaxAge: 600
+
+# ========================================================================
+# OUTPUTS
+# ========================================================================
+
+Outputs:
+  HatchmarkApiGatewayUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${HatchmarkHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+    Export:
+      Name: HatchmarkApiGatewayUrl
+  
+  HatchmarkGenerateUrlFunction:
+    Description: "Generate Presigned URL Lambda Function ARN"
+    Value: !GetAtt HatchmarkGenerateUrlFunction.Arn
+    Export:
+      Name: HatchmarkGenerateUrlFunctionArn
+  
+  HatchmarkHashFunction:
+    Description: "Hash Function Lambda ARN"
+    Value: !GetAtt HatchmarkHashFunction.Arn
+    Export:
+      Name: HatchmarkHashFunctionArn
+  
+  HatchmarkLedgerFunction:
+    Description: "Ledger Function Lambda ARN"
+    Value: !GetAtt HatchmarkLedgerFunction.Arn
+    Export:
+      Name: HatchmarkLedgerFunctionArn
+  
+  HatchmarkVerificationFunction:
+    Description: "Verification Function Lambda ARN"
+    Value: !GetAtt HatchmarkVerificationFunction.Arn
+    Export:
+      Name: HatchmarkVerificationFunctionArn
+  
+  IngestionBucket:
+    Description: "S3 Bucket for file ingestion"
+    Value: !Ref HatchmarkIngestionBucket
+    Export:
+      Name: HatchmarkIngestionBucket
+  
+  ProcessedBucket:
+    Description: "S3 Bucket for processed files"
+    Value: !Ref HatchmarkProcessedBucket
+    Export:
+      Name: HatchmarkProcessedBucket
+  
+  DynamoDBTable:
+    Description: "DynamoDB Table for asset ledger"
+    Value: "hatchmark-assets"
+    Export:
+      Name: HatchmarkDynamoDBTable
+  
+  SQSQueue:
+    Description: "SQS Queue URL for watermarking"
+    Value: !Ref HatchmarkWatermarkingQueue
+    Export:
+      Name: HatchmarkWatermarkingQueue
+  
+  StepFunction:
+    Description: "Step Functions State Machine ARN"
+    Value: !Ref HatchmarkStepFunction
+    Export:
+      Name: HatchmarkStepFunction
+  
+  ECSCluster:
+    Description: "ECS Cluster for watermarking"
+    Value: !Ref HatchmarkECSCluster
+    Export:
+      Name: HatchmarkECSCluster
+  
+  TaskDefinition:
+    Description: "ECS Task Definition for watermarker"
+    Value: !Ref HatchmarkTaskDefinition
+    Export:
+      Name: HatchmarkTaskDefinition

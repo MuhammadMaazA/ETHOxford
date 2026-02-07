@@ -1,0 +1,120 @@
+{
+  "Comment": "Hatchmark Notarization Pipeline - Processes uploaded images through hashing, ledger registration, and watermarking",
+  "StartAt": "ComputePerceptualHash",
+  "States": {
+    "ComputePerceptualHash": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "hatchmark-computePhash-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.hashResult",
+      "Next": "WriteToLedger",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HashingFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    
+    "WriteToLedger": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "hatchmark-writeToLedger-dev",
+        "Payload": {
+          "bucketName.$": "$.hashResult.Payload.body.bucketName",
+          "objectKey.$": "$.hashResult.Payload.body.objectKey",
+          "perceptualHash.$": "$.hashResult.Payload.body.perceptualHash",
+          "timestamp.$": "$.hashResult.Payload.body.timestamp",
+          "originalFilename.$": "$.originalFilename"
+        }
+      },
+      "ResultPath": "$.ledgerResult",
+      "Next": "SendToWatermarkingQueue",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "LedgerWriteFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    
+    "SendToWatermarkingQueue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage",
+      "Parameters": {
+        "QueueUrl": "https://sqs.us-east-1.amazonaws.com/123456789012/hatchmark-watermarking-queue-dev",
+        "MessageBody": {
+          "s3Key.$": "$.hashResult.Payload.body.objectKey",
+          "transactionId.$": "$.ledgerResult.Payload.body.transactionId",
+          "bucketName.$": "$.hashResult.Payload.body.bucketName",
+          "originalFilename.$": "$.originalFilename",
+          "timestamp.$": "$.hashResult.Payload.body.timestamp"
+        }
+      },
+      "Next": "Notarization Success",
+      "Retry": [
+        {
+          "ErrorEquals": ["SQS.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "QueueSendFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    
+    "NotarizedSuccess": {
+      "Type": "Succeed",
+      "Result": {
+        "status": "SUCCESS",
+        "message": "Image successfully notarized and queued for watermarking"
+      }
+    },
+    
+    "HashingFailed": {
+      "Type": "Fail",
+      "Cause": "Failed to compute perceptual hash of the uploaded image",
+      "Error": "HashingError"
+    },
+    
+    "LedgerWriteFailed": {
+      "Type": "Fail", 
+      "Cause": "Failed to write registration data to QLDB ledger",
+      "Error": "LedgerError"
+    },
+    
+    "QueueSendFailed": {
+      "Type": "Fail",
+      "Cause": "Failed to send watermarking task to SQS queue",
+      "Error": "QueueError"
+    }
+  }
+}
