@@ -113,7 +113,7 @@ function renderResults(body, data, hash) {
         </div>
       </div>
       <div class="hatchmark-matches">${matchesHtml}</div>
-      <a href="https://hatchmark.vercel.app/verify" target="_blank" rel="noopener" class="hatchmark-cta">
+      <a href="https://ethoxford.onrender.com/verify" target="_blank" rel="noopener" class="hatchmark-cta">
         Open Full Verification &rarr;
       </a>
     `;
@@ -131,7 +131,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
   const overlay = createOverlay();
   const body = document.getElementById('hatchmark-body');
-  const apiBase = message.apiBase || 'https://hatchmark.vercel.app';
+  const apiBase = message.apiBase || 'https://ethoxford.onrender.com';
 
   (async () => {
     try {

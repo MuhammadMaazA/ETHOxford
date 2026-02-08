@@ -1,4 +1,4 @@
-const API_BASE = 'https://eth-oxford-one.vercel.app';
+const API_BASE = 'https://ethoxford.onrender.com';
 
 // Inline pHash computation for popup (self-contained, no content script access)
 const DCT_SZ = 32;
@@ -87,14 +87,24 @@ function computeHash(img) {
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
-    // Fetch through extension's background to bypass CORS
+    // Validate it looks like an image URL
+    if (!url.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)/i) && !url.startsWith('data:image')) {
+      return reject(new Error('Not a direct image URL. Right-click an image and copy its image address.'));
+    }
+
     fetch(url)
-      .then(r => r.blob())
+      .then(r => {
+        if (!r.ok) throw new Error('Could not fetch image (HTTP ' + r.status + ')');
+        return r.blob();
+      })
       .then(blob => {
+        if (!blob.type.startsWith('image/')) {
+          throw new Error('URL did not return an image. Make sure to paste a direct image URL.');
+        }
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Failed to load image'));
+        img.onerror = () => reject(new Error('Failed to decode image'));
         img.src = URL.createObjectURL(blob);
       })
       .catch(reject);
