@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Shield, ExternalLink, Loader2, Wallet, Download, X, Award } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useRef, useCallback } from 'react';
-import { Certificate, CertificateData } from '@/components/Certificate';
+import { Certificate } from '@/components/Certificate';
 import { downloadCertificate } from '@/lib/downloadCertificate';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
