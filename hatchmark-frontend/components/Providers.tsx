@@ -6,8 +6,8 @@ import { ReactNode, useState } from 'react';
 import '@mysten/dapp-kit/dist/index.css';
 
 const { networkConfig } = createNetworkConfig({
-  testnet: { url: 'https://fullnode.testnet.sui.io:443' },
-  mainnet: { url: 'https://fullnode.mainnet.sui.io:443' },
+  testnet: { url: 'https://fullnode.testnet.sui.io:443', network: 'testnet' },
+  mainnet: { url: 'https://fullnode.mainnet.sui.io:443', network: 'mainnet' },
 });
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -16,7 +16,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-        <WalletProvider autoConnect stashedWallet={{ name: 'Hatchmark' }}>
+        <WalletProvider autoConnect>
           {children}
         </WalletProvider>
       </SuiClientProvider>
