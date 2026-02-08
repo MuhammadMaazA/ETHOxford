@@ -1,0 +1,8 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "cd hatchmark-frontend && npm install && npm run build"
+
+[deploy]
+startCommand = "cd hatchmark-frontend && npm start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
