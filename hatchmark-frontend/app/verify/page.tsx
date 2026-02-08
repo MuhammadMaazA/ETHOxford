@@ -11,6 +11,9 @@ import { AIDetectionBadge, type AIDetectionResult } from '@/components/AIDetecti
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
 
+// Minimum stake required to file a dispute (0.1 SUI in MIST)
+const DISPUTE_STAKE_MIST = 100_000_000;
+
 interface Match {
   cert_id: string;
   image_hash: string;
@@ -112,18 +115,23 @@ export default function VerifyPage() {
     if (!account) return toast.error('Connect wallet to flag');
 
     const tx = new Transaction();
+
+    // Split 0.1 SUI from gas coin for dispute stake
+    const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(DISPUTE_STAKE_MIST)]);
+
     tx.moveCall({
       target: `${PACKAGE_ID}::registry::flag_content`,
       arguments: [
         tx.object(match.cert_id),
         tx.pure.vector('u8', hexToBytes(hash)),
         tx.pure.u8(Math.min(255, match.hammingDistance)),
+        stakeCoin,
         tx.object('0x6'),
       ],
     });
 
     signAndExecute({ transaction: tx }, {
-      onSuccess: () => toast.success('Dispute filed'),
+      onSuccess: () => toast.success('Dispute filed — 0.1 SUI staked'),
       onError: (err) => toast.error('Failed: ' + err.message),
     });
   };
@@ -194,6 +202,9 @@ export default function VerifyPage() {
                   <div>
                     <h3 className="font-medium text-yellow-800 dark:text-yellow-300">Matches Found</h3>
                     <p className="text-yellow-700 dark:text-yellow-400 text-sm">{result.matches.length} similar content(s)</p>
+                    <p className="text-yellow-600 dark:text-yellow-500 text-xs mt-1">
+                      Filing a dispute requires staking 0.1 SUI. Stake is returned if valid, forfeited if invalid.
+                    </p>
                   </div>
                 </div>
 
@@ -220,27 +231,36 @@ export default function VerifyPage() {
                           {match.creator.slice(0, 12)}...{match.creator.slice(-8)}
                         </p>
 
-                        <div className="flex gap-2">
-                          <a
-                            href={`https://suiscan.xyz/testnet/object/${match.cert_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                          >
-                            View <ExternalLink className="w-3 h-3" />
-                          </a>
-                          {!isOwn && (
+                        <div className="flex flex-col gap-3 mt-3">
+                          <div className="flex gap-2">
+                            <a
+                              href={`https://suiscan.xyz/testnet/object/${match.cert_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              View on-chain <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+
+                          {isOwn ? (
+                            <div className="px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                              <span className="text-sm font-medium text-green-700 dark:text-green-400">This is your registered content</span>
+                              <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">You cannot dispute your own content</p>
+                            </div>
+                          ) : !account ? (
+                            <div className="px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg">
+                              <span className="text-sm text-neutral-600 dark:text-neutral-400">Connect your wallet to file a dispute</span>
+                            </div>
+                          ) : (
                             <button
                               onClick={() => handleFlag(match)}
                               disabled={isPending}
-                              className="flex items-center gap-1 text-sm text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-medium text-sm rounded-lg transition-colors"
                             >
-                              <Flag className="w-3 h-3" />
-                              {isPending ? 'Filing...' : 'Dispute'}
+                              <Flag className="w-4 h-4" />
+                              {isPending ? 'Staking & Filing...' : 'File Dispute (stakes 0.1 SUI)'}
                             </button>
-                          )}
-                          {isOwn && (
-                            <span className="text-sm text-green-600 dark:text-green-400">Your content</span>
                           )}
                         </div>
                       </div>

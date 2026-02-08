@@ -47,12 +47,22 @@ interface Match extends Registration {
   hammingDistance: number;
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function POST(req: Request) {
   try {
     const { hash } = await req.json();
 
     if (!hash || typeof hash !== 'string') {
-      return NextResponse.json({ error: 'Hash required' }, { status: 400 });
+      return NextResponse.json({ error: 'Hash required' }, { status: 400, headers: corsHeaders });
     }
 
     const { data: registrations, error } = await supabase
@@ -61,11 +71,11 @@ export async function POST(req: Request) {
 
     if (error) {
       console.error('DB error:', error);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return NextResponse.json({ error: 'Database error' }, { status: 500, headers: corsHeaders });
     }
 
     if (!registrations?.length) {
-      return NextResponse.json({ matches: [], isOriginal: true });
+      return NextResponse.json({ matches: [], isOriginal: true }, { headers: corsHeaders });
     }
 
     const matches: Match[] = registrations
@@ -82,10 +92,10 @@ export async function POST(req: Request) {
       isOriginal: matches.length === 0,
       exactMatch: matches.find(m => m.similarity === 100) || null,
       totalRegistrations: registrations.length
-    });
+    }, { headers: corsHeaders });
   } catch (err) {
     console.error('Verify error:', err);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Server error' }, { status: 500, headers: corsHeaders });
   }
 }
 

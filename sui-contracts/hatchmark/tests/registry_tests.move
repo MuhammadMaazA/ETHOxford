@@ -3,6 +3,8 @@
 module hatchmark::registry_tests {
     use sui::test_scenario::{Self as ts};
     use sui::clock;
+    use sui::coin;
+    use sui::sui::SUI;
     use std::string;
     use hatchmark::registry::{Self, RegistrationCertificate, Dispute};
 
@@ -11,6 +13,9 @@ module hatchmark::registry_tests {
     // ───────────────────────────────────────────────────────────
     const CREATOR: address = @0xCAFE;
     const FLAGGER: address = @0xBEEF;
+
+    /// Minimum stake = 0.1 SUI (must match contract constant)
+    const STAKE_AMOUNT: u64 = 100_000_000;
 
     fun sample_hash(): vector<u8> {
         // 32-byte mock perceptual hash
@@ -85,10 +90,10 @@ module hatchmark::registry_tests {
     }
 
     // ───────────────────────────────────────────────────────────
-    // Test 3: Flag content creates a dispute
+    // Test 3: Flag content creates a staked dispute
     // ───────────────────────────────────────────────────────────
     #[test]
-    fun test_flag_content() {
+    fun test_flag_content_with_stake() {
         let mut scenario = ts::begin(CREATOR);
         let clk = clock::create_for_testing(scenario.ctx());
 
@@ -101,37 +106,72 @@ module hatchmark::registry_tests {
             scenario.ctx(),
         );
 
-        // Step 2: Flagger flags the content
+        // Step 2: Flagger flags the content with a SUI stake
         ts::next_tx(&mut scenario, FLAGGER);
         let cert = ts::take_from_address<RegistrationCertificate>(&scenario, CREATOR);
+
+        // Mint a test coin for staking
+        let stake_coin = coin::mint_for_testing<SUI>(STAKE_AMOUNT, scenario.ctx());
 
         registry::flag_content(
             &cert,
             flagged_hash(),
             5, // similarity score (low hamming distance = very similar)
+            stake_coin,
             &clk,
             scenario.ctx(),
         );
 
         ts::return_to_address(CREATOR, cert);
 
-        // Step 3: Verify dispute was created for flagger
+        // Step 3: Verify dispute was created as a shared object
         ts::next_tx(&mut scenario, FLAGGER);
-        let dispute = ts::take_from_sender<Dispute>(&scenario);
+        let dispute = ts::take_shared<Dispute>(&scenario);
         assert!(registry::dispute_status(&dispute) == 0); // STATUS_OPEN
         assert!(registry::dispute_similarity(&dispute) == 5);
         assert!(registry::dispute_flagger(&dispute) == FLAGGER);
+        assert!(registry::dispute_stake_value(&dispute) == STAKE_AMOUNT);
 
-        ts::return_to_sender(&scenario, dispute);
+        ts::return_shared(dispute);
         clock::destroy_for_testing(clk);
         ts::end(scenario);
     }
 
     // ───────────────────────────────────────────────────────────
-    // Test 4: Creator resolves dispute as valid
+    // Test 4: Flag fails with insufficient stake
     // ───────────────────────────────────────────────────────────
     #[test]
-    fun test_resolve_dispute_valid() {
+    #[expected_failure(abort_code = registry::EInsufficientStake)]
+    fun test_flag_insufficient_stake_fails() {
+        let mut scenario = ts::begin(CREATOR);
+        let clk = clock::create_for_testing(scenario.ctx());
+
+        registry::register(
+            sample_hash(),
+            string::utf8(b"Original"),
+            string::utf8(b""),
+            &clk,
+            scenario.ctx(),
+        );
+
+        ts::next_tx(&mut scenario, FLAGGER);
+        let cert = ts::take_from_address<RegistrationCertificate>(&scenario, CREATOR);
+
+        // Only stake 1 MIST — way below minimum
+        let tiny_stake = coin::mint_for_testing<SUI>(1, scenario.ctx());
+
+        registry::flag_content(&cert, flagged_hash(), 3, tiny_stake, &clk, scenario.ctx());
+
+        ts::return_to_address(CREATOR, cert);
+        clock::destroy_for_testing(clk);
+        ts::end(scenario);
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // Test 5: Creator resolves dispute as valid → stake returned to flagger
+    // ───────────────────────────────────────────────────────────
+    #[test]
+    fun test_resolve_dispute_valid_returns_stake() {
         let mut scenario = ts::begin(CREATOR);
         let clk = clock::create_for_testing(scenario.ctx());
 
@@ -144,28 +184,69 @@ module hatchmark::registry_tests {
             scenario.ctx(),
         );
 
-        // Flag
+        // Flag with stake
         ts::next_tx(&mut scenario, FLAGGER);
         let cert = ts::take_from_address<RegistrationCertificate>(&scenario, CREATOR);
-        registry::flag_content(&cert, flagged_hash(), 3, &clk, scenario.ctx());
+        let stake_coin = coin::mint_for_testing<SUI>(STAKE_AMOUNT, scenario.ctx());
+        registry::flag_content(&cert, flagged_hash(), 3, stake_coin, &clk, scenario.ctx());
         ts::return_to_address(CREATOR, cert);
 
-        // Resolve — must be called by CREATOR
+        // Resolve as valid (1) — creator confirms infringement
         ts::next_tx(&mut scenario, CREATOR);
         let cert = ts::take_from_sender<RegistrationCertificate>(&scenario);
-        let mut dispute = ts::take_from_address<Dispute>(&scenario, FLAGGER);
+        let mut dispute = ts::take_shared<Dispute>(&scenario);
 
         registry::resolve_dispute(&mut dispute, &cert, 1, scenario.ctx()); // 1 = valid
         assert!(registry::dispute_status(&dispute) == 1);
+        assert!(registry::dispute_stake_value(&dispute) == 0); // stake withdrawn
 
-        ts::return_to_address(FLAGGER, dispute);
+        ts::return_shared(dispute);
         ts::return_to_sender(&scenario, cert);
         clock::destroy_for_testing(clk);
         ts::end(scenario);
     }
 
     // ───────────────────────────────────────────────────────────
-    // Test 5: Non-creator cannot resolve dispute
+    // Test 6: Creator resolves dispute as invalid → stake goes to creator
+    // ───────────────────────────────────────────────────────────
+    #[test]
+    fun test_resolve_dispute_invalid_forfeits_stake() {
+        let mut scenario = ts::begin(CREATOR);
+        let clk = clock::create_for_testing(scenario.ctx());
+
+        // Register
+        registry::register(
+            sample_hash(),
+            string::utf8(b"Original"),
+            string::utf8(b""),
+            &clk,
+            scenario.ctx(),
+        );
+
+        // Flag with stake
+        ts::next_tx(&mut scenario, FLAGGER);
+        let cert = ts::take_from_address<RegistrationCertificate>(&scenario, CREATOR);
+        let stake_coin = coin::mint_for_testing<SUI>(STAKE_AMOUNT, scenario.ctx());
+        registry::flag_content(&cert, flagged_hash(), 3, stake_coin, &clk, scenario.ctx());
+        ts::return_to_address(CREATOR, cert);
+
+        // Resolve as invalid (2) — false flag
+        ts::next_tx(&mut scenario, CREATOR);
+        let cert = ts::take_from_sender<RegistrationCertificate>(&scenario);
+        let mut dispute = ts::take_shared<Dispute>(&scenario);
+
+        registry::resolve_dispute(&mut dispute, &cert, 2, scenario.ctx()); // 2 = invalid
+        assert!(registry::dispute_status(&dispute) == 2);
+        assert!(registry::dispute_stake_value(&dispute) == 0); // stake withdrawn
+
+        ts::return_shared(dispute);
+        ts::return_to_sender(&scenario, cert);
+        clock::destroy_for_testing(clk);
+        ts::end(scenario);
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // Test 7: Non-creator cannot resolve dispute
     // ───────────────────────────────────────────────────────────
     #[test]
     #[expected_failure(abort_code = registry::ENotCreator)]
@@ -182,21 +263,22 @@ module hatchmark::registry_tests {
             scenario.ctx(),
         );
 
-        // Flag
+        // Flag with stake
         ts::next_tx(&mut scenario, FLAGGER);
         let cert = ts::take_from_address<RegistrationCertificate>(&scenario, CREATOR);
-        registry::flag_content(&cert, flagged_hash(), 3, &clk, scenario.ctx());
+        let stake_coin = coin::mint_for_testing<SUI>(STAKE_AMOUNT, scenario.ctx());
+        registry::flag_content(&cert, flagged_hash(), 3, stake_coin, &clk, scenario.ctx());
         ts::return_to_address(CREATOR, cert);
 
         // FLAGGER tries to resolve — should fail
         ts::next_tx(&mut scenario, FLAGGER);
         let cert = ts::take_from_address<RegistrationCertificate>(&scenario, CREATOR);
-        let mut dispute = ts::take_from_sender<Dispute>(&scenario);
+        let mut dispute = ts::take_shared<Dispute>(&scenario);
 
         registry::resolve_dispute(&mut dispute, &cert, 1, scenario.ctx()); // should abort
 
         ts::return_to_address(CREATOR, cert);
-        ts::return_to_sender(&scenario, dispute);
+        ts::return_shared(dispute);
         clock::destroy_for_testing(clk);
         ts::end(scenario);
     }
