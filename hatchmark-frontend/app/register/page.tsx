@@ -29,7 +29,6 @@ export default function RegisterPage() {
   } | null>(null);
   const [aiDetection, setAiDetection] = useState<AIDetectionResult | null>(null);
   const [isDetectingAI, setIsDetectingAI] = useState(false);
-  const [, setUploadedFile] = useState<File | null>(null);
 
   const checkDuplicate = useCallback(async (hash: string) => {
     setIsChecking(true);
@@ -100,7 +99,6 @@ export default function RegisterPage() {
 
     setDuplicateInfo(null);
     setAiDetection(null);
-    setUploadedFile(file);
     const preview = URL.createObjectURL(file);
     setImagePreview(preview);
 
