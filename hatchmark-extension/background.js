@@ -1,4 +1,4 @@
-const API_BASE = 'https://hatchmark.vercel.app';
+const API_BASE = 'https://hatchmark-frontend.vercel.app';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
