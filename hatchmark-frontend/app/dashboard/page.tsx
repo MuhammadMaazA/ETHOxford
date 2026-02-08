@@ -2,8 +2,11 @@
 
 import { useCurrentAccount, useSuiClient } from '@mysten/dapp-kit';
 import { useQuery } from '@tanstack/react-query';
-import { Shield, ExternalLink, Loader2, Wallet } from 'lucide-react';
+import { Shield, ExternalLink, Loader2, Wallet, Download, X, Award } from 'lucide-react';
 import Link from 'next/link';
+import { useState, useRef, useCallback } from 'react';
+import { Certificate, CertificateData } from '@/components/Certificate';
+import { downloadCertificate } from '@/lib/downloadCertificate';
 
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
 
@@ -17,6 +20,9 @@ interface Cert {
 export default function DashboardPage() {
   const account = useCurrentAccount();
   const client = useSuiClient();
+  const [selectedCert, setSelectedCert] = useState<Cert | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const certificateRef = useRef<HTMLDivElement>(null);
 
   const { data: certs, isLoading } = useQuery({
     queryKey: ['certs', account?.address],
@@ -49,6 +55,22 @@ export default function DashboardPage() {
     if (!ts) return 'Unknown';
     return new Date(ts).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
+
+  const handleDownload = useCallback(async () => {
+    if (!certificateRef.current || !selectedCert) return;
+    
+    setIsDownloading(true);
+    try {
+      await downloadCertificate(
+        certificateRef.current,
+        `hatchmark-certificate-${selectedCert.title.replace(/\s+/g, '-').toLowerCase()}`
+      );
+    } catch (error) {
+      console.error('Failed to download certificate:', error);
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [selectedCert]);
 
   if (!account) {
     return (
@@ -121,17 +143,70 @@ export default function DashboardPage() {
                   </div>
                   <h3 className="font-medium text-neutral-900 dark:text-white mb-1 truncate">{cert.title}</h3>
                   <p className="text-sm text-neutral-500 mb-3">{formatDate(cert.timestamp)}</p>
-                  <div className="bg-neutral-100 dark:bg-neutral-800 rounded-lg px-3 py-2">
+                  <div className="bg-neutral-100 dark:bg-neutral-800 rounded-lg px-3 py-2 mb-3">
                     <code className="text-xs text-neutral-600 dark:text-neutral-400 font-mono">
                       {cert.hash.slice(0, 16)}...
                     </code>
                   </div>
+                  <button
+                    onClick={() => setSelectedCert(cert)}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Award className="w-4 h-4" />
+                    View Certificate
+                  </button>
                 </div>
               ))}
             </div>
           </>
         )}
       </div>
+
+      {/* Certificate Modal */}
+      {selectedCert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="relative bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-neutral-900 dark:text-white">Certificate</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {isDownloading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  {isDownloading ? 'Downloading...' : 'Download'}
+                </button>
+                <button
+                  onClick={() => setSelectedCert(null)}
+                  className="p-2 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            
+            {/* Certificate Content */}
+            <div className="p-6">
+              <Certificate
+                ref={certificateRef}
+                data={{
+                  id: selectedCert.id,
+                  hash: selectedCert.hash,
+                  title: selectedCert.title,
+                  timestamp: selectedCert.timestamp,
+                  owner: account?.address,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
