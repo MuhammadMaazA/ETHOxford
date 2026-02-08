@@ -150,7 +150,7 @@ export default function DashboardPage() {
                   </div>
                   <button
                     onClick={() => setSelectedCert(cert)}
-                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="w-full flex items-center justify-center gap-2 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white border border-neutral-200 dark:border-neutral-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
                     <Award className="w-4 h-4" />
                     View Certificate
