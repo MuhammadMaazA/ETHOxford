@@ -1,10 +1,16 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+let _supabase: SupabaseClient | null = null;
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 function hammingDistance(hash1: string, hash2: string): number {
   const h1 = hash1.toLowerCase();
@@ -65,7 +71,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Hash required' }, { status: 400, headers: corsHeaders });
     }
 
-    const { data: registrations, error } = await supabase
+    const { data: registrations, error } = await getSupabase()
       .from('registrations')
       .select('*');
 
