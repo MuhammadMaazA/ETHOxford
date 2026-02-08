@@ -1,4 +1,4 @@
-const API_BASE = 'https://hatchmark-frontend.vercel.app';
+const API_BASE = 'https://eth-oxford-one.vercel.app';
 
 // Inline pHash computation for popup (self-contained, no content script access)
 const DCT_SZ = 32;
