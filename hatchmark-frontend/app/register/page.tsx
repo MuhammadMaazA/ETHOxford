@@ -9,52 +9,59 @@ import { Upload, Image as ImageIcon, CheckCircle, Loader2, ExternalLink } from '
 import { computePerceptualHash } from '@/lib/phash';
 import { AIDetectionBadge, type AIDetectionResult } from '@/components/AIDetectionBadge';
 
-const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
-
-interface DuplicateInfo {
-  isDuplicate: boolean;
-  existingCert?: { title: string; creator: string; registered_at: number };
-}
+const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || 
+  '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
+const SUI_CLOCK = '0x6';
 
 export default function RegisterPage() {
   const account = useCurrentAccount();
   const { mutate: signAndExecute, isPending } = useSignAndExecuteTransaction();
 
-  const [preview, setPreview] = useState<string | null>(null);
-  const [hash, setHash] = useState('');
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageHash, setImageHash] = useState<string>('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [txDigest, setTxDigest] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    isDuplicate: boolean;
+    existingCert?: { title: string; creator: string; registered_at: number };
+  } | null>(null);
   const [aiDetection, setAiDetection] = useState<AIDetectionResult | null>(null);
   const [isDetectingAI, setIsDetectingAI] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
-  const checkDuplicate = useCallback(async (h: string) => {
-    setChecking(true);
+  const checkDuplicate = useCallback(async (hash: string) => {
+    setIsChecking(true);
     try {
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash: h }),
+        body: JSON.stringify({ hash }),
       });
       const data = await res.json();
-      
+
       if (data.exactMatch) {
-        setDuplicate({ isDuplicate: true, existingCert: data.exactMatch });
-        toast.error('Already registered!');
-      } else if (data.matches?.length && data.matches[0].similarity >= 70) {
-        setDuplicate({ isDuplicate: true, existingCert: data.matches[0] });
-        toast.error('Similar image registered!');
+        setDuplicateInfo({ isDuplicate: true, existingCert: data.exactMatch });
+        toast.error('This image is already registered!');
+      } else if (data.matches && data.matches.length > 0 && data.matches[0].similarity >= 70) {
+        setDuplicateInfo({ isDuplicate: true, existingCert: data.matches[0] });
+        toast.error('A very similar image is already registered!');
       } else {
-        setDuplicate({ isDuplicate: false });
-        toast.success('Ready to register');
+        setDuplicateInfo({ isDuplicate: false });
+        toast.success('Image is original - ready to register!');
       }
-    } catch {
-      setDuplicate({ isDuplicate: false });
+    } catch (error) {
+      console.error('Duplicate check failed:', error);
+      setDuplicateInfo({ isDuplicate: false });
     } finally {
-      setChecking(false);
+      setIsChecking(false);
     }
+  }, []);
+
+  const computeHash = useCallback(async (file: File) => {
+    const hash = await computePerceptualHash(file);
+    return hash;
   }, []);
 
   const detectAI = useCallback(async (file: File) => {
@@ -64,7 +71,7 @@ export default function RegisterPage() {
       reader.onload = async (e) => {
         const base64 = e.target?.result?.toString().split(',')[1];
         if (!base64) return;
-        
+
         const res = await fetch('/api/ai-detect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -72,7 +79,7 @@ export default function RegisterPage() {
         });
         const data = await res.json();
         setAiDetection(data);
-        
+
         if (data.isAIGenerated && data.confidence > 70) {
           toast('This image appears to be AI-generated', { icon: '🤖' });
         }
@@ -82,25 +89,30 @@ export default function RegisterPage() {
       console.error('AI detection failed:', error);
       setAiDetection(null);
     } finally {
+      // Small delay to ensure state updates properly
       setTimeout(() => setIsDetectingAI(false), 500);
     }
   }, []);
 
-  const onDrop = useCallback(async (files: File[]) => {
-    const file = files[0];
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    const file = acceptedFiles[0];
     if (!file) return;
 
-    setDuplicate(null);
+    setDuplicateInfo(null);
     setAiDetection(null);
-    setPreview(URL.createObjectURL(file));
-    const h = await computePerceptualHash(file);
-    setHash(h);
-    
+    setUploadedFile(file);
+    const preview = URL.createObjectURL(file);
+    setImagePreview(preview);
+
+    const hash = await computeHash(file);
+    setImageHash(hash);
+
+    // Run duplicate check and AI detection in parallel
     await Promise.all([
-      checkDuplicate(h),
+      checkDuplicate(hash),
       detectAI(file),
     ]);
-  }, [checkDuplicate, detectAI]);
+  }, [computeHash, checkDuplicate, detectAI]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -117,117 +129,172 @@ export default function RegisterPage() {
   };
 
   const handleRegister = async () => {
-    if (!account) return toast.error('Connect wallet first');
-    if (!hash) return toast.error('Upload an image first');
-    if (!title.trim()) return toast.error('Enter a title');
-    if (duplicate?.isDuplicate) return toast.error('Already registered');
+    if (!account) {
+      toast.error('Please connect your wallet first');
+      return;
+    }
+    if (!imageHash) {
+      toast.error('Please upload an image first');
+      return;
+    }
+    if (!title.trim()) {
+      toast.error('Please enter a title');
+      return;
+    }
+    if (duplicateInfo?.isDuplicate) {
+      toast.error('Cannot register - this image is already registered!');
+      return;
+    }
 
-    const tx = new Transaction();
-    tx.moveCall({
-      target: `${PACKAGE_ID}::registry::register`,
-      arguments: [
-        tx.pure.vector('u8', hexToBytes(hash)),
-        tx.pure.string(title),
-        tx.pure.string(description),
-        tx.object('0x6'),
-      ],
-    });
+    try {
+      const tx = new Transaction();
+      const hashBytes = hexToBytes(imageHash);
 
-    signAndExecute({ transaction: tx }, {
-      onSuccess: async (result) => {
-        setTxDigest(result.digest);
-        toast.success('Registered!');
-        try {
-          await fetch('/api/register-local', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image_hash: hash,
-              creator: account?.address,
-              title,
-              description,
-              tx_digest: result.digest,
-            }),
-          });
-        } catch {}
-      },
-      onError: (err) => toast.error('Failed: ' + err.message),
-    });
+      tx.moveCall({
+        target: `${PACKAGE_ID}::registry::register`,
+        arguments: [
+          tx.pure.vector('u8', hashBytes),
+          tx.pure.string(title),
+          tx.pure.string(description),
+          tx.object(SUI_CLOCK),
+        ],
+      });
+
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: async (result) => {
+            setTxDigest(result.digest);
+            toast.success('Content registered successfully!');
+
+            try {
+              await fetch('/api/register-local', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  image_hash: imageHash,
+                  creator: account?.address,
+                  title: title,
+                  description: description,
+                  tx_digest: result.digest,
+                }),
+              });
+            } catch (e) {
+              console.log('Local sync skipped:', e);
+            }
+          },
+          onError: (error) => {
+            console.error('Transaction failed:', error);
+            toast.error('Registration failed: ' + error.message);
+          },
+        }
+      );
+    } catch (error) {
+      console.error('Error building transaction:', error);
+      toast.error('Failed to build transaction');
+    }
   };
 
-  if (txDigest) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
-        <div className="text-center px-4">
-          <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
-            <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
-          </div>
-          <h1 className="text-2xl font-semibold text-neutral-900 dark:text-white mb-2">Registered!</h1>
-          <p className="text-neutral-500 mb-6">Your content is now on the blockchain</p>
-          <a
-            href={`https://suiscan.xyz/testnet/tx/${txDigest}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            View transaction <ExternalLink className="w-4 h-4" />
-          </a>
-        </div>
-      </div>
-    );
-  }
+  const explorerUrl = txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : null;
 
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950">
-      <div className="max-w-4xl mx-auto px-4 py-16">
+      <div className="max-w-3xl mx-auto px-4 py-16">
+        {/* Header */}
         <div className="mb-12">
-          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white mb-2">Register Content</h1>
-          <p className="text-neutral-500">Upload an image to register ownership on the blockchain</p>
+          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white mb-2">
+            Register Content
+          </h1>
+          <p className="text-neutral-500 dark:text-neutral-400">
+            Upload an image to register its ownership on the blockchain
+          </p>
         </div>
 
+        {/* Success State */}
+        {txDigest && (
+          <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6 mb-8">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-100 dark:bg-green-500/20 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-neutral-900 dark:text-white">Registration Complete</h2>
+                <p className="text-sm text-neutral-500">Your content is now protected on-chain</p>
+              </div>
+            </div>
+            <a
+              href={explorerUrl!}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" />
+              View on Explorer
+            </a>
+          </div>
+        )}
+
         <div className="grid md:grid-cols-2 gap-8">
-          <div>
+          {/* Upload Section */}
+          <div className="space-y-4">
             <div
               {...getRootProps()}
-              className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-colors ${
+              className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-200 ${
                 isDragActive
-                  ? 'border-neutral-400 bg-neutral-100 dark:bg-neutral-900'
-                  : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
+                  ? 'border-neutral-900 dark:border-white bg-neutral-50 dark:bg-neutral-900'
+                  : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-600'
               }`}
             >
               <input {...getInputProps()} />
-              {preview ? (
-                <img src={preview} alt="Preview" className="max-h-64 mx-auto rounded-lg" />
+              {imagePreview ? (
+                <div className="space-y-3">
+                  <img src={imagePreview} alt="Preview" className="max-h-48 mx-auto rounded-lg" />
+                  <p className="text-sm text-neutral-500">Click or drag to replace</p>
+                </div>
               ) : (
-                <div className="py-8">
-                  <ImageIcon className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
-                  <p className="text-neutral-600 dark:text-neutral-400">Drop image here or click to upload</p>
+                <div className="space-y-3">
+                  <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto">
+                    <ImageIcon className="w-6 h-6 text-neutral-400" />
+                  </div>
+                  <div>
+                    <p className="text-neutral-700 dark:text-neutral-300 font-medium">Drop your image here</p>
+                    <p className="text-sm text-neutral-500 mt-1">or click to browse</p>
+                  </div>
                 </div>
               )}
             </div>
 
-            {hash && (
-              <div className="mt-4 p-4 bg-neutral-50 dark:bg-neutral-900 rounded-xl">
-                <p className="text-xs text-neutral-500 mb-1">Hash</p>
-                <code className="text-sm font-mono text-neutral-700 dark:text-neutral-300 break-all">{hash}</code>
+            {/* Hash Display */}
+            {imageHash && (
+              <div className="bg-neutral-50 dark:bg-neutral-900 rounded-xl p-4 border border-neutral-200 dark:border-neutral-800">
+                <p className="text-xs text-neutral-500 mb-1">Content Hash</p>
+                <code className="text-xs text-neutral-700 dark:text-neutral-300 font-mono break-all">
+                  {imageHash}
+                </code>
               </div>
             )}
 
-            {checking && (
-              <div className="mt-4 flex items-center gap-2 text-neutral-500">
+            {/* Status Messages */}
+            {isChecking && (
+              <div className="flex items-center gap-2 text-sm text-neutral-500">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Checking...
+                Checking registry...
               </div>
             )}
 
-            {duplicate?.isDuplicate && (
-              <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
-                <p className="text-red-700 dark:text-red-400 text-sm font-medium">Already registered</p>
-                {duplicate.existingCert && (
-                  <p className="text-red-600 dark:text-red-500 text-xs mt-1">
-                    "{duplicate.existingCert.title}" by {duplicate.existingCert.creator.slice(0, 8)}...
-                  </p>
-                )}
+            {duplicateInfo?.isDuplicate && duplicateInfo.existingCert && (
+              <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4">
+                <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">Already Registered</p>
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  &quot;{duplicateInfo.existingCert.title}&quot; • {new Date(duplicateInfo.existingCert.registered_at).toLocaleDateString()}
+                </p>
+              </div>
+            )}
+
+            {duplicateInfo && !duplicateInfo.isDuplicate && (
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <CheckCircle className="w-4 h-4" />
+                Original content - ready to register
               </div>
             )}
 
@@ -235,40 +302,65 @@ export default function RegisterPage() {
             {(isDetectingAI || aiDetection) && (
               <AIDetectionBadge result={aiDetection} isLoading={isDetectingAI} />
             )}
+          </div>
+
+          {/* Form Section */}
+          <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Title</label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
+                Title
+              </label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="My artwork"
-                className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white"
+                placeholder="My Artwork"
+                className="w-full px-4 py-3 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white transition-all"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Description</label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
+                Description <span className="text-neutral-400 font-normal">(optional)</span>
+              </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Optional"
-                rows={3}
-                className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white resize-none"
+                placeholder="Describe your content..."
+                rows={4}
+                className="w-full px-4 py-3 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white transition-all resize-none"
               />
             </div>
 
-            <button
-              onClick={handleRegister}
-              disabled={!account || !hash || !title || duplicate?.isDuplicate || isPending}
-              className="w-full flex items-center justify-center gap-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 py-3 rounded-xl font-medium hover:bg-neutral-800 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              {isPending ? 'Registering...' : 'Register on Blockchain'}
-            </button>
-
-            {!account && (
-              <p className="text-center text-sm text-neutral-500">Connect wallet to register</p>
+            {!account ? (
+              <div className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 text-center">
+                <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                  Connect your wallet to register content
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={handleRegister}
+                disabled={!imageHash || !title || isPending || isChecking || duplicateInfo?.isDuplicate}
+                className="w-full flex items-center justify-center gap-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 py-3 rounded-xl font-medium hover:bg-neutral-800 dark:hover:bg-neutral-100 disabled:bg-neutral-200 dark:disabled:bg-neutral-800 disabled:text-neutral-400 dark:disabled:text-neutral-600 disabled:cursor-not-allowed transition-colors"
+              >
+                {isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Registering...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    Register on Blockchain
+                  </>
+                )}
+              </button>
             )}
+
+            <p className="text-xs text-neutral-500 text-center">
+              Registration requires a small amount of SUI for gas
+            </p>
           </div>
         </div>
       </div>
