@@ -5,7 +5,7 @@ import { Shield, Upload, Search, CheckCircle } from 'lucide-react';
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950">
+    <div className="min-h-screen">
       <section className="max-w-4xl mx-auto px-4 py-24 md:py-32">
         <div className="space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-neutral-100 dark:bg-neutral-900 rounded-full text-sm text-neutral-600 dark:text-neutral-400">
@@ -61,8 +61,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50">
-        <div className="max-w-4xl mx-auto px-4 py-24 text-center">
+      <section className="border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/80 dark:bg-neutral-900/60 backdrop-blur-sm">
+        <div className="max-w-4xl mx-auto px-4 py-24 text-center relative z-10">
           <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white mb-4">Ready to protect your work?</h2>
           <p className="text-neutral-600 dark:text-neutral-400 mb-8 max-w-md mx-auto">
             Start registering your content on the blockchain today.

@@ -196,7 +196,7 @@ export default function RegisterPage() {
   const explorerUrl = txDigest ? `https://suiscan.xyz/testnet/tx/${txDigest}` : null;
 
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950">
+    <div className="min-h-screen">
       <div className="max-w-3xl mx-auto px-4 py-16">
         {/* Header */}
         <div className="mb-12">

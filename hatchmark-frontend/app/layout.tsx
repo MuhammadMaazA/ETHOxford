@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Navigation } from "@/components/Navigation";
+import { BlockchainBackground } from "@/components/BlockchainBackground";
 import { Toaster } from "react-hot-toast";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -26,8 +27,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white dark:bg-neutral-950`} suppressHydrationWarning>
         <ThemeProvider>
           <Providers>
+            <BlockchainBackground />
             <Navigation />
-            <main className="min-h-screen">{children}</main>
+            <main className="min-h-screen relative z-10">{children}</main>
             <Toaster position="bottom-right" toastOptions={{
               className: 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white',
             }} />

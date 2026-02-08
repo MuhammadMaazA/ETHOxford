@@ -141,7 +141,7 @@ export default function VerifyPage() {
   });
 
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950">
+    <div className="min-h-screen">
       <div className="max-w-3xl mx-auto px-4 py-16">
         <div className="mb-12">
           <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white mb-2">Verify Content</h1>

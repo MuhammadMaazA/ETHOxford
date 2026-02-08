@@ -74,7 +74,7 @@ export default function DashboardPage() {
 
   if (!account) {
     return (
-      <div className="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center px-4">
           <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
             <Wallet className="w-6 h-6 text-neutral-400" />
@@ -87,7 +87,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950">
+    <div className="min-h-screen">
       <div className="max-w-4xl mx-auto px-4 py-16">
         <div className="flex justify-between items-start mb-12">
           <div>
