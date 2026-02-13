@@ -13,10 +13,16 @@ import { createClient } from '@supabase/supabase-js';
 
 // Configuration
 const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SUI_RPC_URL = 'https://fullnode.testnet.sui.io:443';
 const POLL_INTERVAL_MS = 10000; // 10 seconds
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('ERROR: Missing required environment variables!');
+  console.error('Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_KEY');
+  process.exit(1);
+}
 
 // Initialize clients
 const sui = new SuiClient({ url: SUI_RPC_URL });
