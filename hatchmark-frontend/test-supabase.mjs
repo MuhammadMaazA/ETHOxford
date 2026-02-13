@@ -97,7 +97,7 @@ async function testConnection() {
     } else {
       console.log('⚠️  Database tables: MISSING');
       console.log('\n📝 ACTION REQUIRED:');
-      console.log('1. Go to: https://your-project.supabase.co/project/_/sql');
+      console.log(`1. Go to: ${supabaseUrl}/project/_/sql`);
       console.log('2. Run the SQL from SUPABASE_SETUP.md (Step 4)');
       console.log('3. Run this test again\n');
     }

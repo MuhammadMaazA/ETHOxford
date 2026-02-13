@@ -5,11 +5,21 @@
 
 import { SuiClient } from '@mysten/sui/client';
 import { createClient } from '@supabase/supabase-js';
+import * as dotenv from 'dotenv';
+import { resolve } from 'path';
 
-const PACKAGE_ID = '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
-const SUPABASE_URL = 'https://your-project.supabase.co';
-const SUPABASE_KEY = 'your-service-role-key';
+dotenv.config({ path: resolve(__dirname, '../.env.local') });
+
+const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SUI_RPC_URL = 'https://fullnode.testnet.sui.io:443';
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('ERROR: Missing required environment variables!');
+  console.error('Please create .env.local with NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_KEY');
+  process.exit(1);
+}
 
 const sui = new SuiClient({ url: SUI_RPC_URL });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);

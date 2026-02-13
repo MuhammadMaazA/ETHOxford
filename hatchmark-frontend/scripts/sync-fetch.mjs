@@ -1,12 +1,35 @@
 /**
  * Quick sync script - uses native fetch for simplicity
  * Run with: node scripts/sync-fetch.mjs
+ *
+ * Requires environment variables in .env.local:
+ * - NEXT_PUBLIC_PACKAGE_ID
+ * - NEXT_PUBLIC_SUPABASE_URL
+ * - SUPABASE_SERVICE_KEY
  */
 
-const PACKAGE_ID = '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
-const SUPABASE_URL = 'https://your-project.supabase.co';
-const SUPABASE_KEY = 'your-service-role-key';
+import { readFileSync } from 'fs';
+
+const envContent = readFileSync('.env.local', 'utf-8');
+const envVars = {};
+envContent.split('\n').forEach(line => {
+  line = line.trim();
+  if (line && !line.startsWith('#') && line.includes('=')) {
+    const [key, ...valueParts] = line.split('=');
+    envVars[key.trim()] = valueParts.join('=').trim();
+  }
+});
+
+const PACKAGE_ID = envVars.NEXT_PUBLIC_PACKAGE_ID || '0x65c282c2a27cd8e3ed94fef0275635ce5e2e569ef83adec8421069625c62d4fe';
+const SUPABASE_URL = envVars.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = envVars.SUPABASE_SERVICE_KEY;
 const SUI_RPC_URL = 'https://fullnode.testnet.sui.io:443';
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('ERROR: Missing required environment variables!');
+  console.error('Please create .env.local with NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_KEY');
+  process.exit(1);
+}
 
 function bytesToHex(bytes) {
   return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
